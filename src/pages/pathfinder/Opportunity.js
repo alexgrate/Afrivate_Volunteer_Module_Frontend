@@ -1,12 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
-import * as api from "../../services/api";
-
-const FALLBACK_OPPORTUNITIES = [
-  { id: "1", title: "CORPSAFRICA Volunteer Program", company: "MSME Africa", type: "Volunteering", location: "Multiple African Countries", button: "Apply" },
-  { id: "2", title: "Content Writer – African Tech", company: "TechCabal", type: "Volunteering", location: "Remote", button: "Apply" },
-];
+import { opportunities, bookmarks, applications } from "../../services/api";
+import { getOrgName, navigateToVolunteerDetails } from "../../utils/opportunityUtils";
 
 function mapOpportunityFromApi(item) {
   if (!item) return null;
@@ -14,9 +10,9 @@ function mapOpportunityFromApi(item) {
   return {
     id: String(item.id),
     title: item.title,
-    company: item.location || "Remote",
-    type: "Volunteering",
-    location: item.location || "Remote",
+    company: getOrgName(item),
+    type: item.opportunity_type || "Volunteering",
+    location: item.location || "",
     button: "Apply",
     _raw: item,
   };
@@ -27,29 +23,22 @@ const Opportunity = () => {
   const [search, setSearch] = useState("");
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [savedIds, setSavedIds] = useState(new Set());
+  const [appliedMap, setAppliedMap] = useState({});
 
-  // ✅ FETCH REAL OPPORTUNITIES
   const loadOpportunities = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const data = await api.bookmark.opportunitiesList();
-      // handle different backend shapes
-const rawList =
-  Array.isArray(data) ? data :
-  Array.isArray(data?.results) ? data.results :
-  [];
-
-const arr = rawList.map(mapOpportunityFromApi).filter(Boolean);
+      const data = await opportunities.list({ is_open: true });
+      const rawList = Array.isArray(data) ? data : Array.isArray(data?.results) ? data.results : [];
+      const arr = rawList.map(mapOpportunityFromApi).filter(Boolean);
       setList(arr);
-      try {
-        localStorage.setItem("opportunityListCache", JSON.stringify(rawList));
-      } catch (_) {}
-    } catch {
-      setList(FALLBACK_OPPORTUNITIES);
-      try {
-        localStorage.setItem("opportunityListCache", JSON.stringify(FALLBACK_OPPORTUNITIES));
-      } catch (_) {}
+    } catch (err) {
+      console.error("Error loading opportunities:", err);
+      setError(err.message || "Failed to load opportunities");
+      setList([]);
     } finally {
       setLoading(false);
     }
@@ -57,15 +46,34 @@ const arr = rawList.map(mapOpportunityFromApi).filter(Boolean);
 
   const loadSavedIds = useCallback(async () => {
     try {
+      const api = await import("../../services/api");
       if (!api.getAccessToken()) return;
-      const data = await api.bookmark.list();
+      const data = await bookmarks.list();
       const raw = Array.isArray(data) ? data : Array.isArray(data?.results) ? data.results : [];
       const ids = new Set(raw.map((b) => String(b.opportunity_id ?? b.opportunity?.id ?? b.id)).filter(Boolean));
       setSavedIds(ids);
-    } catch (_) {}
+    } catch (err) {
+      console.error("Error loading saved IDs:", err);
+    }
+  }, []);
+
+  const loadApplications = useCallback(async () => {
+    try {
+      const api = await import("../../services/api");
+      if (!api.getAccessToken()) return;
+      const data = await applications.list();
+      const raw = Array.isArray(data) ? data : Array.isArray(data?.results) ? data.results : [];
+      const map = {};
+      raw.forEach((app) => {
+        const oppId = String(app.opportunity ?? app.opportunity_id ?? app.id);
+        if (oppId) map[oppId] = app;
+      });
+      setAppliedMap(map);
+    } catch (err) {
+      console.error("Error loading applications:", err);
+    }
   }, []);
   
-
   useEffect(() => {
     document.title = "Opportunities - AfriVate";
     try {
@@ -77,7 +85,8 @@ const arr = rawList.map(mapOpportunityFromApi).filter(Boolean);
     } catch (_) {}
     loadOpportunities();
     loadSavedIds();
-  }, [loadOpportunities, loadSavedIds]);
+    loadApplications();
+  }, [loadOpportunities, loadSavedIds, loadApplications]);
 
   const filteredList = list.filter(
     (item) =>
@@ -87,11 +96,13 @@ const arr = rawList.map(mapOpportunityFromApi).filter(Boolean);
 
   const handleSave = async (item) => {
     try {
-      await api.bookmark.opportunitiesSavedCreate({
+      await bookmarks.opportunitiesSavedCreate({
         opportunity_id: Number(item.id),
       });
       setSavedIds((prev) => new Set([...prev, item.id]));
-    } catch {}
+    } catch (err) {
+      console.error("Error saving opportunity:", err);
+    }
   };
 
   return (
@@ -108,6 +119,12 @@ const arr = rawList.map(mapOpportunityFromApi).filter(Boolean);
           className="w-full border rounded-full px-4 py-2 mb-4"
         />
 
+        {error && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded-lg mb-4">
+            {error}
+          </div>
+        )}
+
         {loading ? (
           <p className="text-center text-gray-500">Loading...</p>
         ) : (
@@ -115,7 +132,25 @@ const arr = rawList.map(mapOpportunityFromApi).filter(Boolean);
             {filteredList.map((item) => (
               <div
                 key={item.id}
-                className="border rounded-lg p-3 flex justify-between items-center"
+                className="border rounded-lg p-3 flex justify-between items-center cursor-pointer"
+                onClick={async (e) => {
+                  if (e.target.closest('button')) return;
+                  // viewing details when clicking card
+                  const app = appliedMap[item.id];
+                  if (app) {
+                    navigate("/apply/" + item.id, {
+                      state: {
+                        job: item,
+                        existingApplication: app,
+                        isEdit: true,
+                      },
+                    });
+                  } else {
+                    await navigateToVolunteerDetails(navigate, item.id, {
+                      fallbackJob: item,
+                    });
+                  }
+                }}
               >
                 <div>
                   <h2 className="font-bold">{item.title}</h2>
@@ -130,12 +165,23 @@ const arr = rawList.map(mapOpportunityFromApi).filter(Boolean);
                     {savedIds.has(item.id) ? "Saved" : "Save"}
                   </button>
                   <button
-                    onClick={() =>
-                      navigate("/volunteer-details", { state: { job: item } })
-                    }
+                    onClick={() => {
+                      const app = appliedMap[item.id];
+                      if (app) {
+                        navigate("/apply/" + item.id, {
+                          state: {
+                            job: item,
+                            existingApplication: app,
+                            isEdit: true,
+                          },
+                        });
+                      } else {
+                        navigate("/volunteer-details", { state: { job: item } });
+                      }
+                    }}
                     className="bg-[#6A00B1] text-white px-4 py-1 rounded"
                   >
-                    Apply
+                    {appliedMap[item.id] ? "View application" : "Apply"}
                   </button>
                 </div>
               </div>

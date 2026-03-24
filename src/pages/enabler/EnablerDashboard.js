@@ -2,12 +2,15 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
 import { useUser } from "../../context/UserContext";
+import { opportunities, applications, profile } from "../../services/api";
 
 const EnablerDashboard = () => {
   const navigate = useNavigate();
-  const { user } = useUser();
-  const [opportunities, setOpportunities] = useState([]);
+  const { user, loading, error, logout, clearError } = useUser();
+  const [opportunitiesList, setOpportunitiesList] = useState([]);
   const [welcomeName, setWelcomeName] = useState("");
+  const [opportunitiesLoading, setOpportunitiesLoading] = useState(true);
+  const [applicants, setApplicants] = useState([]);
 
   useEffect(() => {
     document.title = "Enabler Dashboard - AfriVate";
@@ -16,59 +19,103 @@ const EnablerDashboard = () => {
   useEffect(() => {
     if (user && user.name) {
       setWelcomeName(user.name);
-    } else {
-      try {
-        const profile = JSON.parse(localStorage.getItem("enablerProfile") || "{}");
-        setWelcomeName(profile.name || "");
-      } catch (_) {
-        setWelcomeName("");
-      }
+    } else if (user && user.first_name) {
+      setWelcomeName(user.first_name);
     }
   }, [user]);
 
-  // Load opportunities from localStorage so dashboard shows real data
+  // Load opportunities from API
   useEffect(() => {
-    const load = () => {
+    const loadOpportunities = async () => {
+      setOpportunitiesLoading(true);
       try {
-        const saved = JSON.parse(localStorage.getItem('enablerOpportunities') || '[]');
-        setOpportunities(saved);
-      } catch (_) {
-        setOpportunities([]);
+      const data = await opportunities.mine();
+        const list = Array.isArray(data) ? data : [];
+        setOpportunitiesList(list);
+      } catch (err) {
+        console.error("Error loading opportunities:", err);
+        setOpportunitiesList([]);
+      } finally {
+        setOpportunitiesLoading(false);
       }
     };
-    load();
-    window.addEventListener('storage', load);
-    return () => window.removeEventListener('storage', load);
+    loadOpportunities();
+  }, []);
+
+  // Load applications from API
+  useEffect(() => {
+    const loadApplications = async () => {
+      try {
+        const data = await applications.list();
+        if (Array.isArray(data)) {
+          const byOpp = {};
+          data.forEach((a) => {
+            const oid = String(a.opportunity || "");
+            if (!oid) return;
+            if (!byOpp[oid]) {
+              byOpp[oid] = { 
+                opportunityId: oid, 
+                jobTitle: a.opportunity_title || "Opportunity", 
+                count: 0,
+                status: a.status || "pending"
+              };
+            }
+            byOpp[oid].count += 1;
+          });
+          
+          setApplicants(
+            Object.values(byOpp).map((o) => ({
+              opportunityId: o.opportunityId,
+              jobTitle: o.jobTitle,
+              applications: o.count,
+              status: o.status === "pending" ? "Pending" : o.status === "accepted" ? "Accepted" : o.status === "rejected" ? "Rejected" : "New",
+              statusColor: o.status === "pending" ? "bg-yellow-100 text-yellow-800" : o.status === "accepted" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800",
+            }))
+          );
+        }
+      } catch (err) {
+        console.error("Error loading applications:", err);
+        setApplicants([]);
+      }
+    };
+    loadApplications();
   }, []);
 
   const analytics = [
-    { label: "Views", value: "—", change: "", trend: "up", period: "API not connected" },
-    { label: "Completed Applications", value: "—", change: "", trend: "up", period: "API not connected" },
-    { label: "Qualified Candidates", value: "—", change: "", trend: "up", period: "API not connected" },
+    { label: "Views", value: "—", change: "", trend: "up", period: "Coming soon" },
+    { label: "Completed Applications", value: applicants.length, change: "", trend: "up", period: "Total applications" },
+    { label: "Qualified Candidates", value: "—", change: "", trend: "up", period: "Coming soon" },
   ];
 
-  const [applicants, setApplicants] = useState([]);
-  useEffect(() => {
-    const apps = JSON.parse(localStorage.getItem("pathfinderApplications") || "[]");
-    const byOpp = {};
-    apps.forEach((a) => {
-      const oid = String(a.opportunityId || "");
-      if (!oid) return;
-      if (!byOpp[oid]) {
-        byOpp[oid] = { opportunityId: oid, jobTitle: a.opportunityTitle || "Opportunity", count: 0 };
-      }
-      byOpp[oid].count += 1;
-    });
-    setApplicants(
-      Object.values(byOpp).map((o) => ({
-        opportunityId: o.opportunityId,
-        jobTitle: o.jobTitle,
-        applications: o.count,
-        status: "New",
-        statusColor: "bg-green-100 text-green-800",
-      }))
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-white font-sans flex items-center justify-center">
+        <EnablerNavbar />
+        <div className="pt-20 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent mx-auto mb-4" />
+          <p className="text-gray-600">Loading your dashboard...</p>
+        </div>
+      </div>
     );
-  }, [opportunities]);
+  }
+
+  if (error && !user) {
+    return (
+      <div className="min-h-screen bg-white font-sans">
+        <EnablerNavbar />
+        <div className="pt-24 px-4 max-w-md mx-auto text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button
+            type="button"
+            onClick={() => { clearError(); logout(); navigate('/login'); }}
+            className="bg-[#6A00B1] text-white px-5 py-2.5 rounded-lg font-medium hover:bg-[#5A0091]"
+          >
+            Log out and sign in again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white font-sans">
@@ -104,21 +151,21 @@ const EnablerDashboard = () => {
             </div>
           </div>
 
-          {/* Your opportunities from localStorage */}
-          {opportunities.length > 0 && (
+          {/* Your opportunities from API */}
+          {!opportunitiesLoading && opportunitiesList.length > 0 && (
             <div className="mb-6 md:mb-8">
               <h2 className="text-lg md:text-xl lg:text-2xl font-bold text-black mb-3 md:mb-4">
                 Your Opportunities
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                {opportunities.slice(0, 4).map((opp) => (
+                {opportunitiesList.slice(0, 4).map((opp) => (
                   <div
                     key={opp.id}
                     className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
                     onClick={() => navigate(`/enabler/opportunity/${opp.id}`)}
                   >
                     <p className="font-semibold text-gray-900 text-sm md:text-base truncate">{opp.title}</p>
-                    <p className="text-gray-600 text-xs md:text-sm mt-1">{opp.company} · {opp.location || '—'}</p>
+                    <p className="text-gray-600 text-xs md:text-sm mt-1">{opp.opportunity_type || 'Volunteering'} · {opp.location || 'Remote'}</p>
                     <button
                       onClick={(e) => { e.stopPropagation(); navigate(`/enabler/opportunity/${opp.id}`); }}
                       className="mt-2 text-[#6A00B1] text-xs font-semibold hover:underline"
@@ -128,14 +175,32 @@ const EnablerDashboard = () => {
                   </div>
                 ))}
               </div>
-              {opportunities.length > 4 && (
+              {opportunitiesList.length > 4 && (
                 <button
                   onClick={() => navigate('/enabler/opportunities-posted')}
                   className="mt-3 text-[#6A00B1] text-sm font-semibold hover:underline"
                 >
-                  View all ({opportunities.length}) opportunities
+                  View all ({opportunitiesList.length}) opportunities
                 </button>
               )}
+            </div>
+          )}
+
+          {/* Empty State for Opportunities */}
+          {!opportunitiesLoading && opportunitiesList.length === 0 && (
+            <div className="mb-6 md:mb-8">
+              <h2 className="text-lg md:text-xl lg:text-2xl font-bold text-black mb-3 md:mb-4">
+                Your Opportunities
+              </h2>
+              <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
+                <p className="text-gray-500 mb-4">You haven't posted any opportunities yet.</p>
+                <button
+                  onClick={() => navigate('/create-opportunity')}
+                  className="bg-[#6A00B1] text-white px-6 py-2 rounded-lg font-semibold hover:bg-[#5A0091] transition-colors"
+                >
+                  Post Your First Opportunity
+                </button>
+              </div>
             </div>
           )}
 

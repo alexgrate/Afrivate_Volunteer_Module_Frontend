@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Input from '../../components/common/Input';
+import PasswordInput from '../../components/common/PasswordInput';
 import api, { getApiErrorMessage } from '../../services/api';
 import { GoogleAuthButton } from '../../components/auth/GoogleAuthButton';
 
@@ -104,23 +105,33 @@ const SignUp = () => {
         role,
       });
 
+      let tokenData = null;
       try {
-        const tokenData = await api.auth.token({
+        tokenData = await api.auth.token({
           email: formData.email,
-          password: formData.password
+          password: formData.password,
         });
-        if (tokenData.access) {
+        if (tokenData && tokenData.access) {
           api.setTokens(tokenData.access, tokenData.refresh);
         }
-      } catch (_) {}
+      } catch (tokenErr) {
+        setServerError(getApiErrorMessage(tokenErr) || 'Account created but we could not sign you in. Please try logging in.');
+        setLoading(false);
+        return;
+      }
 
-      localStorage.setItem('hasCompletedProfile', 'false');
+      if (!tokenData || !tokenData.access) {
+        setServerError('Account created but we could not sign you in. Please try logging in.');
+        setLoading(false);
+        return;
+      }
+
+      api.setRole(role);
 
       if (role === "enabler") {
-        localStorage.setItem('hasCompletedEnablerProfile', 'false');
         navigate('/enabler/profile-setup');
       } else {
-        navigate('/edit-new-profile');
+        navigate('/pathfinder/profile-setup');
       }
     } catch (err) {
       setServerError(getApiErrorMessage(err) || 'Signup failed');
@@ -198,7 +209,7 @@ const SignUp = () => {
                   : "text-[#002060]"
               }`}
             >
-              <i class="fas fa-regular fa-user-circle text-base mr-1"></i>AS PATHFINDER
+              <i className="fas fa-regular fa-user-circle text-base mr-1"></i>AS PATHFINDER
             </button>
             <button
               type="button"
@@ -209,27 +220,25 @@ const SignUp = () => {
                   : "text-[#002060]"
               }`}
             >
-              <i class="fas fa-regular fa-user-circle text-base mr-1"></i>AS ENABLER
+              <i className="fas fa-regular fa-user-circle text-base mr-1"></i>AS ENABLER
             </button>
           </div>
 
-          <Input
-            type="password"
+          <PasswordInput
             name="password"
             placeholder="Password"
             value={formData.password}
             onChange={handleChange}
+            error={errors.password}
           />
-          {errors.password && <p className="text-red-500 text-xs">{errors.password}</p>}
 
-          <Input
-            type="password"
+          <PasswordInput
             name="confirmPassword"
             placeholder="Repeat Password"
             value={formData.confirmPassword}
             onChange={handleChange}
+            error={errors.confirmPassword}
           />
-          {errors.confirmPassword && <p className="text-red-500 text-xs">{errors.confirmPassword}</p>}
 
           {serverError && (
             <p className="text-red-500 text-center text-sm font-semibold">

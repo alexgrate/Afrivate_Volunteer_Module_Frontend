@@ -117,6 +117,11 @@ npm run deploy
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## Documentation
+
+**Full documentation** (routes, API, localStorage, user flows, components): **[DOCUMENTATION.md](DOCUMENTATION.md)**.  
+Use it for onboarding, indexing the website, and understanding all API calls and data storage.
+
 ## Contact
 
 Your Name - [@yourusername](https://twitter.com/yourusername)

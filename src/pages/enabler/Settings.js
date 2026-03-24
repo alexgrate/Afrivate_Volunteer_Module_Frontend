@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
 import Modal from "../../components/common/Modal";
 import Toast from "../../components/common/Toast";
-import * as api from "../../services/api";
+import { profile } from "../../services/api";
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -13,59 +13,75 @@ const Settings = () => {
     document.title = "Enabler Settings - AfriVate";
   }, []);
 
+  // Form fields match API: name, employees, role, base_details (contact_email, address, state, country), social_links
   const [formData, setFormData] = useState({
-    fullName: "",
-    email: "",
-    phoneNumber: "",
-    location: "",
+    name: "",
+    employees: "",
+    role: "",
+    contact_email: "",
+    address: "",
+    state: "",
+    country: "",
+    bio: "",
+    phone_number: "",
+    website: "",
     currentPassword: "",
     newPassword: "",
-    bio: "",
-    website: "",
   });
+  const [socialLinks, setSocialLinks] = useState([]);
+  const [baseDetailsId, setBaseDetailsId] = useState(null);
   const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
-  const [companyName, setCompanyName] = useState("");
-  const [editingField, setEditingField] = useState(null);
-  const [tempValues, setTempValues] = useState({});
+  const [credentials, setCredentials] = useState([]);
+  const [documentFile, setDocumentFile] = useState(null);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [docUploadError, setDocUploadError] = useState(null);
+  const documentInputRef = useRef(null);
   const [deleteModal, setDeleteModal] = useState({ isOpen: false });
   const [toast, setToast] = useState({ isOpen: false, message: "", type: "success" });
+  const [loading, setLoading] = useState(true);
 
   const loadProfile = useCallback(async () => {
+    setLoading(true);
     try {
-      const data = await api.profile.enablerGet();
-      const base = data.base_details || {};
-      setFormData((prev) => ({
-        ...prev,
-        fullName: data.name ?? prev.fullName,
-        email: base.contact_email ?? prev.email,
-        phoneNumber: base.phone_number ?? prev.phoneNumber,
-        location: base.address ?? base.country ?? prev.location,
-        bio: base.bio ?? prev.bio,
-        website: base.website ?? prev.website,
-      }));
-      setProfilePhotoUrl(base.profile_pic || "");
-      setCompanyName((data.name || "").toUpperCase());
-      return;
-    } catch (_) {}
-    try {
-      const saved = localStorage.getItem("enablerProfile");
-      if (saved) {
-        const profile = JSON.parse(saved);
+      const data = await profile.enablerGet();
+      if (data) {
+        const base = data.base_details || {};
+        if (base.id != null) setBaseDetailsId(base.id);
         setFormData((prev) => ({
           ...prev,
-          fullName: profile.name ?? prev.fullName,
-          email: profile.email ?? prev.email,
-          phoneNumber: profile.phoneNumber ?? prev.phoneNumber,
-          location: profile.address ?? prev.location,
-          bio: profile.bio ?? prev.bio,
-          website: profile.website ?? prev.website,
+          name: data.name || "",
+          employees: data.employees != null && data.employees !== "" ? String(data.employees) : "",
+          role: data.role || "",
+          contact_email: base.contact_email || "",
+          address: base.address || "",
+          state: base.state || "",
+          country: base.country || "",
+          bio: base.bio || "",
+          phone_number: base.phone_number || "",
+          website: base.website || "",
         }));
-        setProfilePhotoUrl(profile.profilePictureDataUrl || "");
-        setCompanyName((profile.name || "").toUpperCase());
+        setSocialLinks(Array.isArray(data.social_links) ? data.social_links : []);
       }
-    } catch (e) {
-      console.error("Error loading enabler profile:", e);
+    } catch (err) {
+      console.error("Error loading enabler profile:", err);
     }
+    
+    try {
+      const picData = await profile.pictureGet();
+      if (picData && picData.profile_pic) {
+        setProfilePhotoUrl(picData.profile_pic);
+      }
+    } catch (picErr) {
+      console.log("No profile picture yet");
+    }
+
+    try {
+      const credList = await profile.credentialsList();
+      const credsArray = Array.isArray(credList) ? credList : credList?.results || [];
+      setCredentials(credsArray);
+    } catch (_) {}
+    
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -80,68 +96,114 @@ const Settings = () => {
     }));
   };
 
-  const handleEditClick = (fieldName) => {
-    setEditingField(fieldName);
-    setTempValues(prev => ({
-      ...prev,
-      [fieldName]: formData[fieldName]
-    }));
+  const addSocialLink = () => {
+    setSocialLinks((prev) => [...prev, { platform_name: "", platform_url: "" }]);
   };
 
-  const handleSaveField = (fieldName) => {
-    setFormData(prev => ({
-      ...prev,
-      [fieldName]: tempValues[fieldName] || prev[fieldName]
-    }));
-    setEditingField(null);
+  const updateSocialLink = (index, field, value) => {
+    setSocialLinks((prev) => {
+      const next = [...prev];
+      if (!next[index]) next[index] = { platform_name: "", platform_url: "" };
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
   };
 
-  const handleCancelEdit = () => {
-    setEditingField(null);
-    setTempValues({});
+  const removeSocialLink = (index) => {
+    setSocialLinks((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handlePhotoChange = (e) => {
+  const handlePhotoChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !file.type.startsWith("image/")) return;
+    
+    // Show preview immediately
     const reader = new FileReader();
     reader.onload = () => setProfilePhotoUrl(reader.result);
     reader.readAsDataURL(file);
+    
+    // Upload to server
+    try {
+      const formDataToSend = new FormData();
+      formDataToSend.append("profile_pic", file);
+      await profile.picturePatch(formDataToSend);
+      setToast({ isOpen: true, message: "Profile picture updated!", type: "success" });
+    } catch (err) {
+      console.error("Error uploading profile picture:", err);
+      setToast({ isOpen: true, message: "Failed to upload picture. Try again.", type: "error" });
+    }
   };
 
   const handleSave = async () => {
     try {
-      const existing = JSON.parse(localStorage.getItem("enablerProfile") || "{}");
-      const updated = {
-        ...existing,
-        name: formData.fullName.trim() || existing.name,
-        email: formData.email.trim() || existing.email,
-        phoneNumber: formData.phoneNumber.trim() || existing.phoneNumber,
-        address: formData.location.trim() || existing.address,
-        website: formData.website.trim() || existing.website,
-        bio: formData.bio.trim() || existing.bio,
-        profilePictureDataUrl: profilePhotoUrl || existing.profilePictureDataUrl,
-        updatedAt: new Date().toISOString(),
+      const name = formData.name.trim();
+      const contact_email = formData.contact_email.trim();
+      const address = formData.address.trim();
+      const state = formData.state.trim();
+      const country = formData.country.trim();
+      if (!name || !contact_email || !address || !state || !country) {
+        setToast({ isOpen: true, message: "Name, email, address, state and country are required.", type: "error" });
+        return;
+      }
+      const employeesNum = formData.employees.trim() === "" ? null : parseInt(formData.employees, 10);
+      // API expects base_details with: bio, contact_email, phone_number, address, state, country, website
+      const base_details = {
+        bio: (formData.bio || "").trim() || "",
+        contact_email,
+        phone_number: (formData.phone_number || "").trim() || "",
+        address,
+        state,
+        country,
+        website: (formData.website || "").trim() || "",
       };
-      localStorage.setItem("enablerProfile", JSON.stringify(updated));
-      setCompanyName((updated.name || "TECH INNOVATORS").toUpperCase());
-
-      try {
-        await api.profile.enablerPatch({
-          name: formData.fullName.trim() || existing.name,
-          base_details: {
-            bio: formData.bio.trim() || "",
-            contact_email: formData.email.trim() || "",
-            phone_number: formData.phoneNumber.trim() || "",
-            website: formData.website.trim() || "",
-            address: formData.location.trim() || "",
-          },
-        });
-      } catch (_) {}
-
+      if (baseDetailsId != null) base_details.id = baseDetailsId;
+      const updateData = {
+        name,
+        employees: Number.isNaN(employeesNum) ? null : employeesNum,
+        role: formData.role.trim() || null,
+        base_details,
+        social_links: socialLinks
+          .map((l) => ({ platform_name: (l.platform_name || "").trim(), platform_url: (l.platform_url || "").trim() }))
+          .filter((l) => l.platform_name || l.platform_url),
+      };
+      await profile.enablerUpdate(updateData);
       setToast({ isOpen: true, message: "Changes saved successfully!", type: "success" });
-    } catch (e) {
-      setToast({ isOpen: true, message: "Failed to save. Try again.", type: "error" });
+    } catch (err) {
+      console.error("Error saving profile:", err);
+      setToast({ isOpen: true, message: err.message || "Failed to save. Try again.", type: "error" });
+    }
+  };
+
+  const handleDocumentUpload = async () => {
+    if (!documentFile) return;
+    setUploadingDoc(true);
+    setDocUploadError(null);
+    try {
+      const fd = new FormData();
+      fd.append("document_name", documentFile.name || "Company Document");
+      fd.append("document", documentFile);
+      await profile.credentialsCreate(fd);
+      const credList = await profile.credentialsList();
+      const credsArray = Array.isArray(credList) ? credList : credList?.results || [];
+      setCredentials(credsArray);
+      setDocumentFile(null);
+      if (documentInputRef.current) documentInputRef.current.value = "";
+      setToast({ isOpen: true, message: "Document uploaded successfully.", type: "success" });
+    } catch (err) {
+      setDocUploadError(err.message || "Failed to upload document.");
+      setToast({ isOpen: true, message: "Failed to upload document. Try again.", type: "error" });
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
+  const handleDeleteCredential = async (id) => {
+    try {
+      await profile.credentialsDelete(id);
+      setCredentials((prev) => prev.filter((c) => c.id !== id));
+      setToast({ isOpen: true, message: "Document removed.", type: "success" });
+    } catch (err) {
+      setToast({ isOpen: true, message: "Failed to remove document.", type: "error" });
     }
   };
 
@@ -154,19 +216,27 @@ const Settings = () => {
   };
 
   const confirmDeleteAccount = () => {
-    // Delete account logic here
     setToast({ isOpen: true, message: "Account deletion requested", type: "info" });
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-white font-sans">
+        <EnablerNavbar />
+        <div className="pt-20 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent mx-auto"></div>
+          <p className="text-gray-600 mt-4">Loading settings...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white font-sans">
       <EnablerNavbar />
       
-      {/* Main Content */}
       <div className="pt-20 px-4 md:px-8 lg:px-12 pb-8">
         <div className="max-w-4xl mx-auto">
-          
-          {/* Page Title */}
           <div className="mb-6">
             <h1 className="text-2xl md:text-3xl font-bold text-black mb-2">
               Enabler Settings
@@ -176,7 +246,6 @@ const Settings = () => {
             </p>
           </div>
 
-          {/* Action Buttons - Top Right (Desktop) / Bottom (Mobile) */}
           <div className="hidden md:flex justify-end gap-3 mb-6">
             <button
               onClick={handleCancel}
@@ -192,9 +261,7 @@ const Settings = () => {
             </button>
           </div>
 
-          {/* Profile Header Section */}
-          <div className="flex flex-col md:flex-row gap-6 mb-8">
-            {/* Logo Section */}
+            <div className="flex flex-col md:flex-row gap-6 mb-8">
             <div className="flex flex-col items-center md:items-start">
               <div className="w-32 h-32 bg-gray-200 rounded-full flex items-center justify-center mb-4 overflow-hidden flex-shrink-0">
                 {profilePhotoUrl ? (
@@ -219,154 +286,173 @@ const Settings = () => {
               </button>
             </div>
 
-            {/* Company Info */}
-            <div className="flex-1 space-y-4">
-              <h1 className="text-2xl md:text-3xl font-bold text-black">
-                {companyName}
+            <div className="flex-1">
+              <h1 className="text-2xl md:text-3xl font-bold text-black mb-4">
+                {formData.name ? formData.name.toUpperCase() : "ENABLER"}
               </h1>
-              
-              {/* Edit Bio */}
-              <div>
-                {editingField === 'bio' ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      name="bio"
-                      value={tempValues.bio !== undefined ? tempValues.bio : formData.bio}
-                      onChange={(e) => setTempValues(prev => ({ ...prev, bio: e.target.value }))}
-                      placeholder="Edit Bio"
-                      className="flex-1 border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => handleSaveField('bio')}
-                      className="text-green-600 hover:text-green-700 transition-colors"
-                    >
-                      <i className="fa fa-check text-sm"></i>
-                    </button>
-                    <button
-                      onClick={handleCancelEdit}
-                      className="text-red-600 hover:text-red-700 transition-colors"
-                    >
-                      <i className="fa fa-times text-sm"></i>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-700 text-sm md:text-base">
-                      {formData.bio || "Edit Bio"}
-                    </span>
-                    <button
-                      onClick={() => handleEditClick('bio')}
-                      className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
-                    >
-                      <i className="fa fa-pencil text-sm"></i>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Website */}
-              <div>
-                {editingField === 'website' ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      name="website"
-                      value={tempValues.website !== undefined ? tempValues.website : formData.website}
-                      onChange={(e) => setTempValues(prev => ({ ...prev, website: e.target.value }))}
-                      placeholder="Website"
-                      className="flex-1 border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => handleSaveField('website')}
-                      className="text-green-600 hover:text-green-700 transition-colors"
-                    >
-                      <i className="fa fa-check text-sm"></i>
-                    </button>
-                    <button
-                      onClick={handleCancelEdit}
-                      className="text-red-600 hover:text-red-700 transition-colors"
-                    >
-                      <i className="fa fa-times text-sm"></i>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-700 text-sm md:text-base">
-                      {formData.website || "Website"}
-                    </span>
-                    <button
-                      onClick={() => handleEditClick('website')}
-                      className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
-                    >
-                      <i className="fa fa-pencil text-sm"></i>
-                    </button>
-                  </div>
-                )}
-              </div>
             </div>
           </div>
 
-          {/* Personal Information Section */}
           <div className="mb-8">
-            <h2 className="text-xl md:text-2xl font-bold text-black mb-4">
-              Personal Information
-            </h2>
+            <h2 className="text-xl md:text-2xl font-bold text-black mb-4">Organization profile</h2>
+            <p className="text-gray-600 text-sm mb-4">
+              Complete your organization details below. Name, contact email, address, state and country are required.
+            </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm text-gray-600 mb-2">Full Name</label>
+                <label className="block text-sm text-gray-600 mb-2">Organization name *</label>
                 <input
                   type="text"
-                  name="fullName"
-                  value={formData.fullName}
+                  name="name"
+                  value={formData.name}
                   onChange={handleInputChange}
-                  placeholder="Enter full name"
+                  placeholder="e.g. Tech Solutions Ltd"
                   className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-2">Email</label>
+                <label className="block text-sm text-gray-600 mb-2">Employees</label>
+                <input
+                  type="number"
+                  name="employees"
+                  value={formData.employees}
+                  onChange={handleInputChange}
+                  placeholder="e.g. 50"
+                  min="0"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">Role</label>
+                <input
+                  type="text"
+                  name="role"
+                  value={formData.role}
+                  onChange={handleInputChange}
+                  placeholder="e.g. CEO"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">Contact email *</label>
                 <input
                   type="email"
-                  name="email"
-                  value={formData.email}
+                  name="contact_email"
+                  value={formData.contact_email}
                   onChange={handleInputChange}
-                  placeholder="Enter email"
+                  placeholder="admin@company.com"
                   className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-2">Phone Number</label>
-                <input
-                  type="tel"
-                  name="phoneNumber"
-                  value={formData.phoneNumber}
-                  onChange={handleInputChange}
-                  placeholder="Enter phone number"
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-2">Location</label>
+                <label className="block text-sm text-gray-600 mb-2">Address *</label>
                 <input
                   type="text"
-                  name="location"
-                  value={formData.location}
+                  name="address"
+                  value={formData.address}
                   onChange={handleInputChange}
-                  placeholder="Enter location"
+                  placeholder="456 Corporate Way"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">State *</label>
+                <input
+                  type="text"
+                  name="state"
+                  value={formData.state}
+                  onChange={handleInputChange}
+                  placeholder="e.g. Accra"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">Country *</label>
+                <input
+                  type="text"
+                  name="country"
+                  value={formData.country}
+                  onChange={handleInputChange}
+                  placeholder="e.g. Ghana"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">Phone number</label>
+                <input
+                  type="tel"
+                  name="phone_number"
+                  value={formData.phone_number}
+                  onChange={handleInputChange}
+                  placeholder="+234..."
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">Short bio</label>
+                <input
+                  type="text"
+                  name="bio"
+                  value={formData.bio}
+                  onChange={handleInputChange}
+                  placeholder="Short bio"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">Website</label>
+                <input
+                  type="url"
+                  name="website"
+                  value={formData.website}
+                  onChange={handleInputChange}
+                  placeholder="https://..."
                   className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700"
                 />
               </div>
             </div>
+
+            <div className="mt-6">
+              <h3 className="text-lg font-bold text-black mb-2">Social links</h3>
+              <p className="text-gray-600 text-sm mb-2">Add platform name and URL (e.g. Website, https://company.com)</p>
+              {socialLinks.map((link, index) => (
+                <div key={index} className="flex flex-wrap gap-2 items-center mb-2">
+                  <input
+                    type="text"
+                    value={link.platform_name || ""}
+                    onChange={(e) => updateSocialLink(index, "platform_name", e.target.value)}
+                    placeholder="Platform (e.g. Website)"
+                    className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#6A00B1]"
+                  />
+                  <input
+                    type="url"
+                    value={link.platform_url || ""}
+                    onChange={(e) => updateSocialLink(index, "platform_url", e.target.value)}
+                    placeholder="https://..."
+                    className="flex-1 min-w-[180px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#6A00B1]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeSocialLink(index)}
+                    className="text-red-500 hover:text-red-700 p-2"
+                    title="Remove"
+                  >
+                    <i className="fa fa-times"></i>
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addSocialLink}
+                className="text-[#6A00B1] font-semibold text-sm hover:underline flex items-center gap-1"
+              >
+                <i className="fa fa-plus"></i> Add social link
+              </button>
+            </div>
           </div>
 
-          {/* Change Password Section */}
           <div className="mb-8">
-            <h2 className="text-xl md:text-2xl font-bold text-black mb-4">
-              Change Password
-            </h2>
+            <h2 className="text-xl md:text-2xl font-bold text-black mb-4">Change Password</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-gray-600 mb-2">Current Password</label>
@@ -393,25 +479,74 @@ const Settings = () => {
             </div>
           </div>
 
-          {/* Document Section */}
           <div className="mb-8">
-            <h2 className="text-xl md:text-2xl font-bold text-black mb-4">
-              Document
-            </h2>
+            <h2 className="text-xl md:text-2xl font-bold text-black mb-4">Document</h2>
             <p className="text-gray-600 text-sm md:text-base mb-4">
-              Add your Company's Document (CAC, Affidavit, etc)
+              Add your company documents (e.g. CAC, Affidavit). You can upload PDF or images.
             </p>
-            <button className="bg-[#6A00B1] text-white px-6 py-2.5 rounded-lg text-sm md:text-base font-semibold hover:bg-[#5A0091] transition-colors flex items-center gap-2">
-              <i className="fa fa-plus text-sm"></i>
-              Add Document
-            </button>
+            <input
+              ref={documentInputRef}
+              type="file"
+              accept=".pdf,.png,.jpeg,.jpg,.jfif,.webp"
+              onChange={(e) => setDocumentFile(e.target.files?.[0] || null)}
+              className="hidden"
+            />
+            <div className="flex flex-wrap items-center gap-3 mb-3">
+              <button
+                type="button"
+                onClick={() => documentInputRef.current?.click()}
+                className="bg-[#6A00B1] text-white px-6 py-2.5 rounded-lg text-sm md:text-base font-semibold hover:bg-[#5A0091] transition-colors flex items-center gap-2"
+              >
+                <i className="fa fa-plus text-sm"></i>
+                Choose Document
+              </button>
+              {documentFile && (
+                <>
+                  <span className="text-sm text-gray-600">{documentFile.name}</span>
+                  <button
+                    type="button"
+                    onClick={handleDocumentUpload}
+                    disabled={uploadingDoc}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {uploadingDoc ? "Uploading..." : "Upload"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setDocumentFile(null); if (documentInputRef.current) documentInputRef.current.value = ""; }}
+                    className="text-gray-600 hover:text-gray-800 text-sm"
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
+            </div>
+            {docUploadError && <p className="text-red-500 text-sm mb-2">{docUploadError}</p>}
+            {credentials.length > 0 && (
+              <ul className="space-y-2">
+                {credentials.map((cred) => (
+                  <li key={cred.id} className="flex items-center justify-between bg-gray-50 p-2 rounded-lg">
+                    <span className="text-sm text-gray-700">{cred.document_name || cred.name || "Document"}</span>
+                    <div className="flex items-center gap-2">
+                      {cred.document && (
+                        <a href={cred.document} target="_blank" rel="noopener noreferrer" className="text-[#6A00B1] text-sm hover:underline">View</a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteCredential(cred.id)}
+                        className="text-red-500 hover:text-red-700 text-sm"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
-          {/* Delete Account Section */}
           <div className="border-t border-gray-200 pt-8">
-            <h2 className="text-xl md:text-2xl font-bold text-red-600 mb-4">
-              Delete Account
-            </h2>
+            <h2 className="text-xl md:text-2xl font-bold text-red-600 mb-4">Delete Account</h2>
             <p className="text-gray-700 text-sm md:text-base mb-4">
               Once you delete your account, there is no going back. Please be certain.
             </p>
@@ -423,7 +558,6 @@ const Settings = () => {
             </button>
           </div>
 
-          {/* Action Buttons - Bottom (Mobile Only) */}
           <div className="flex md:hidden flex-col gap-3 mt-8 pt-8 border-t border-gray-200">
             <button
               onClick={handleCancel}
@@ -441,7 +575,6 @@ const Settings = () => {
         </div>
       </div>
 
-      {/* Delete Account Confirmation Modal */}
       <Modal
         isOpen={deleteModal.isOpen}
         onClose={() => setDeleteModal({ isOpen: false })}
@@ -452,7 +585,6 @@ const Settings = () => {
         type="danger"
       />
 
-      {/* Toast Notification */}
       <Toast
         isOpen={toast.isOpen}
         message={toast.message}

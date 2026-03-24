@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Input from '../../components/common/Input';
+import PasswordInput from '../../components/common/PasswordInput';
 import Button from '../../components/common/Button';
 import api, { getApiErrorMessage } from '../../services/api';
 import { useUser } from '../../context/UserContext';
@@ -58,19 +59,46 @@ const Login = () => {
   
       if (data.access) {
         api.setTokens(data.access, data.refresh);
-        let role = 'pathfinder';
+
+        // Determine role from backend: try enabler first, then pathfinder.
+        // Backend returns 403 for wrong role (e.g. pathfinder user on enabler endpoint).
+        let role = null;
+
         try {
           const enabler = await api.profile.enablerGet();
           if (enabler && enabler.id != null) {
             api.setRole('enabler');
             role = 'enabler';
           }
-        } catch (_) {
+        } catch (enablerErr) {
+          // 403/404 = user is not an enabler; try pathfinder below
+          if (enablerErr.status !== 403 && enablerErr.status !== 404) {
+            setServerError(getApiErrorMessage(enablerErr) || 'Login failed');
+            setLoading(false);
+            return;
+          }
+        }
+
+        if (!role) {
           try {
             const pathfinder = await api.profile.pathfinderGet();
-            if (pathfinder && pathfinder.id != null) api.setRole('pathfinder');
-          } catch (__) {}
+            if (pathfinder && pathfinder.id != null) {
+              api.setRole('pathfinder');
+              role = 'pathfinder';
+            }
+          } catch (pathfinderErr) {
+            const msg = getApiErrorMessage(pathfinderErr) || 'Could not load your profile.';
+            setServerError(pathfinderErr.status === 403 ? (msg || 'Access denied. This account does not have pathfinder access.') : msg);
+            setLoading(false);
+            return;
+          }
         }
+
+        if (!role) {
+          api.setRole('pathfinder');
+          role = 'pathfinder';
+        }
+
         await refetchUser();
         navigate(role === 'enabler' ? '/enabler/dashboard' : '/pathf');
       } else {
@@ -135,9 +163,8 @@ const Login = () => {
               
             />
 
-            <Input
+            <PasswordInput
               name="password"
-              type="password"
               placeholder="Password"
               value={formData.password}
               onChange={handleChange}
@@ -194,4 +221,4 @@ const Login = () => {
   );
 };
 
-export default Login; 
+export default Login;

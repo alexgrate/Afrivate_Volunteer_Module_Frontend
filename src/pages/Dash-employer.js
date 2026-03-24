@@ -4,28 +4,68 @@ import Listing from '../Assets/Frame 392.png';
 import reach from '../Assets/Frame 393 (1).png';
 import rate from '../Assets/Frame 394.png';
 import NavBar from '../components/auth/Navbar';
+import { opportunities, applications } from '../services/api';
 
 const DashE = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const opps = JSON.parse(localStorage.getItem('enablerOpportunities') || '[]');
-    const apps = JSON.parse(localStorage.getItem('pathfinderApplications') || '[]');
-    const countByOpp = {};
-    apps.forEach((a) => {
-      const oid = String(a.opportunityId || '');
-      if (oid) countByOpp[oid] = (countByOpp[oid] || 0) + 1;
-    });
-    setJobs(
-      opps.map((o) => ({
-        id: o.id,
-        title: o.title || 'Opportunity',
-        applications: countByOpp[String(o.id)] || 0,
-        status: (countByOpp[String(o.id)] || 0) > 0 ? 'Active' : 'In Review',
-        date: o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '—',
-      }))
-    );
+    const loadData = async () => {
+      try {
+        // Load opportunities and applications from API
+        const [oppsData, appsData] = await Promise.all([
+          opportunities.mine(),
+          applications.list()
+        ]);
+        
+        const opps = Array.isArray(oppsData) ? oppsData : [];
+        const apps = Array.isArray(appsData) ? appsData : [];
+        
+        const countByOpp = {};
+        apps.forEach((a) => {
+          const oid = String(a.opportunity || '');
+          if (oid) countByOpp[oid] = (countByOpp[oid] || 0) + 1;
+        });
+        
+        setJobs(
+          opps.map((o) => ({
+            id: o.id,
+            title: o.title || 'Opportunity',
+            applications: countByOpp[String(o.id)] || 0,
+            status: (countByOpp[String(o.id)] || 0) > 0 ? 'Active' : 'In Review',
+            date: o.posted_at ? new Date(o.posted_at).toLocaleDateString() : '—',
+          }))
+        );
+      } catch (err) {
+        console.error('Error loading data:', err);
+        // Fallback to localStorage
+        try {
+          const opps = JSON.parse(localStorage.getItem('enablerOpportunities') || '[]');
+          const apps = JSON.parse(localStorage.getItem('pathfinderApplications') || '[]');
+          const countByOpp = {};
+          apps.forEach((a) => {
+            const oid = String(a.opportunityId || '');
+            if (oid) countByOpp[oid] = (countByOpp[oid] || 0) + 1;
+          });
+          setJobs(
+            opps.map((o) => ({
+              id: o.id,
+              title: o.title || 'Opportunity',
+              applications: countByOpp[String(o.id)] || 0,
+              status: (countByOpp[String(o.id)] || 0) > 0 ? 'Active' : 'In Review',
+              date: o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '—',
+            }))
+          );
+        } catch (e) {
+          console.error('Error loading from localStorage:', e);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
   }, []);
 
   const getStatusColor = (status) => {

@@ -1,47 +1,139 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
-import { pathfinderDataById } from "../../utils/pathfinderData";
-
-const STORAGE_APPLICATIONS = "pathfinderApplications";
+import Toast from "../../components/common/Toast";
+import { applications, opportunities } from "../../services/api";
 
 const Applicants = () => {
   const navigate = useNavigate();
   const { id: opportunityId } = useParams();
   const [opportunityTitle, setOpportunityTitle] = useState("");
-  const [applications, setApplications] = useState([]);
+  const [applicationsList, setApplicationsList] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
+  const [updatingStatus, setUpdatingStatus] = useState({});
+  const [toast, setToast] = useState({ isOpen: false, message: "", type: "success" });
 
   useEffect(() => {
     document.title = "Applicants - AfriVate";
-    const apps = JSON.parse(localStorage.getItem(STORAGE_APPLICATIONS) || "[]");
-    const forOpp = apps.filter(
-      (a) => String(a.opportunityId) === String(opportunityId)
-    );
-    forOpp.forEach((app) => {
-      pathfinderDataById[app.id] = {
-        id: app.id,
-        name: app.pathfinderName || "Applicant",
-        role: "Pathfinder",
-        location: "",
-        email: app.pathfinderEmail,
-      };
-    });
-    setApplications(forOpp);
-    if (forOpp.length > 0) setOpportunityTitle(forOpp[0].opportunityTitle);
-    else {
-      const opps = JSON.parse(localStorage.getItem("enablerOpportunities") || "[]");
-      const found = opps.find((o) => String(o.id) === String(opportunityId));
-      setOpportunityTitle(found?.title || "Opportunity");
-    }
+    
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        // Load opportunity details
+        try {
+          const oppData = await opportunities.get(opportunityId);
+          if (oppData && oppData.title) {
+            setOpportunityTitle(oppData.title);
+          }
+        } catch (oppErr) {
+          console.error("Error loading opportunity:", oppErr);
+        }
+
+        // Load applications from API
+        const appsData = await applications.list();
+        
+        // Filter applications for this opportunity
+        const forOpp = appsData.filter(
+          (a) => String(a.opportunity) === String(opportunityId) || String(a.opportunity?.id) === String(opportunityId)
+        );
+        
+        // Map to the format needed by the UI - include full cover_letter text
+        const mappedApps = forOpp.map((app) => {
+          const { name, email } = parseContactDetails(app.cover_letter);
+          return {
+            id: app.id,
+            userId: app.user,
+            pathfinderName: name,
+            pathfinderEmail: email,
+            opportunityTitle: app.opportunity_title || opportunityTitle,
+            status: app.status || "pending",
+            applicationText: app.cover_letter || "",
+            cvUrl: app.cv || app.cv_url || app.resume || app.document || null,
+          };
+        });
+        
+        setApplicationsList(mappedApps);
+        
+        if (mappedApps.length > 0 && !opportunityTitle) {
+          setOpportunityTitle(mappedApps[0].opportunityTitle);
+        }
+      } catch (err) {
+        console.error("Error loading applications:", err);
+        setApplicationsList([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadData();
   }, [opportunityId]);
 
   const handleDownloadCv = (app) => {
-    if (!app.cvData) return;
-    const a = document.createElement("a");
-    a.href = app.cvData;
-    a.download = app.cvFileName || "CV.pdf";
-    a.click();
+    // CV download would need additional API endpoint
+    console.log("CV download not available via API");
+  };
+
+  const handleStatusChange = async (appId, newStatus) => {
+    setUpdatingStatus((prev) => ({ ...prev, [appId]: true }));
+    try {
+      await applications.updateStatus(appId, { status: newStatus });
+      // Update the application in the list
+      setApplicationsList((prev) =>
+        prev.map((app) =>
+          app.id === appId ? { ...app, status: newStatus } : app
+        )
+      );
+      const statusLabel = newStatus === "accepted" ? "approved" : newStatus;
+      setToast({
+        isOpen: true,
+        message: `Application ${statusLabel} successfully!`,
+        type: "success",
+      });
+    } catch (error) {
+      console.error("Error updating application status:", error);
+      setToast({
+        isOpen: true,
+        message: "Failed to update application status. Please try again.",
+        type: "error",
+      });
+    } finally {
+      setUpdatingStatus((prev) => ({ ...prev, [appId]: false }));
+    }
+  };
+
+  // Extract contact details (name and email) from cover letter
+  const parseContactDetails = (coverLetter) => {
+    if (!coverLetter) return { name: "Applicant", email: "" };
+    
+    const lines = coverLetter.split("\n");
+    let name = "Applicant";
+    let email = "";
+    
+    let inContactSection = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      if (line.toLowerCase().startsWith("contact details:")) {
+        inContactSection = true;
+        continue;
+      }
+      
+      // Stop at next section header
+      if (inContactSection && (line.toLowerCase().endsWith(":") && !line.includes("@"))) {
+        break;
+      }
+      
+      if (inContactSection) {
+        if (line.toLowerCase().startsWith("full name:")) {
+          name = line.replace(/^full name:\s*/i, "").trim() || "Applicant";
+        } else if (line.toLowerCase().startsWith("email:")) {
+          email = line.replace(/^email:\s*/i, "").trim() || "";
+        }
+      }
+    }
+    
+    return { name, email };
   };
 
   return (
@@ -65,7 +157,12 @@ const Applicants = () => {
             </p>
           </div>
 
-          {applications.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent mx-auto"></div>
+              <p className="text-gray-600 mt-4">Loading applications...</p>
+            </div>
+          ) : applicationsList.length === 0 ? (
             <div className="text-center py-12 bg-gray-50 rounded-lg">
               <i className="fa fa-inbox text-4xl text-gray-300 mb-4"></i>
               <p className="text-gray-500 text-sm md:text-base">
@@ -77,7 +174,7 @@ const Applicants = () => {
             </div>
           ) : (
             <div className="space-y-3">
-              {applications.map((app) => (
+              {applicationsList.map((app) => (
                 <div
                   key={app.id}
                   className="bg-white border border-gray-200 rounded-lg overflow-hidden"
@@ -97,59 +194,50 @@ const Applicants = () => {
                         {app.pathfinderEmail}
                       </p>
                       <p className="text-gray-500 text-xs mt-1 line-clamp-1">
-                        {app.motivation}
+                        {app.applicationText}
                       </p>
                     </div>
-                    <i
-                      className={`fa fa-chevron-${expandedId === app.id ? "up" : "down"} text-gray-400 mt-2`}
-                    ></i>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        app.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                        app.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                        app.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {app.status || 'pending'}
+                      </span>
+                      <i
+                        className={`fa fa-chevron-${expandedId === app.id ? "up" : "down"} text-gray-400`}
+                      ></i>
+                    </div>
                   </div>
 
                   {expandedId === app.id && (
                     <div className="border-t border-gray-100 px-4 py-4 space-y-4 bg-gray-50">
-                      {app.aboutMe && (
-                        <div>
-                          <h3 className="text-sm font-bold text-gray-800 mb-1">About</h3>
-                          <p className="text-gray-600 text-sm whitespace-pre-wrap">{app.aboutMe}</p>
-                        </div>
-                      )}
                       <div>
-                        <h3 className="text-sm font-bold text-gray-800 mb-1">Why applying</h3>
-                        <p className="text-gray-600 text-sm whitespace-pre-wrap">{app.motivation}</p>
+                        <h3 className="text-sm font-bold text-gray-800 mb-1">Application details</h3>
+                        <p className="text-gray-600 text-sm whitespace-pre-wrap">
+                          {app.applicationText || "No details provided"}
+                        </p>
                       </div>
-                      {app.cvFileName && (
-                        <div>
-                          <h3 className="text-sm font-bold text-gray-800 mb-1">CV / Resume</h3>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDownloadCv(app);
-                            }}
-                            className="inline-flex items-center gap-2 text-[#6A00B1] font-semibold text-sm hover:underline"
+                      <div className="flex gap-2 pt-2 flex-wrap">
+                        {app.cvUrl && (
+                          <a
+                            href={app.cvUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="bg-[#E0C6FF] text-[#6A00B1] px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-[#D0B6FF]"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            <i className="fa fa-download"></i>
-                            {app.cvFileName}
-                          </button>
-                        </div>
-                      )}
-                      {app.customAnswers && app.customAnswers.length > 0 && (
-                        <div>
-                          <h3 className="text-sm font-bold text-gray-800 mb-2">Additional answers</h3>
-                          <div className="space-y-2">
-                            {app.customAnswers.map((a, i) => (
-                              <div key={i}>
-                                <p className="text-xs font-semibold text-gray-700">{a.question}</p>
-                                <p className="text-sm text-gray-600 whitespace-pre-wrap">{a.answer || "—"}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      <div className="flex gap-2 pt-2">
+                            Download CV
+                          </a>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/enabler/pathfinder/${app.id}`);
+                            navigate(`/enabler/pathfinder/${app.userId || app.id}`, {
+                              state: { opportunityId: parseInt(opportunityId) }
+                            });
                           }}
                           className="bg-[#E0C6FF] text-[#6A00B1] px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-[#D0B6FF]"
                         >
@@ -158,12 +246,38 @@ const Applicants = () => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/enabler/contact/${app.id}`);
+                            if (app.pathfinderEmail) {
+                              window.location.href = `mailto:${app.pathfinderEmail}`;
+                            }
                           }}
                           className="bg-[#6A00B1] text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-[#5A0091]"
                         >
                           Contact
                         </button>
+                        {app.status === "pending" && (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(app.id, "accepted");
+                              }}
+                              disabled={updatingStatus[app.id]}
+                              className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {updatingStatus[app.id] ? "Approving..." : "Approve"}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(app.id, "rejected");
+                              }}
+                              disabled={updatingStatus[app.id]}
+                              className="bg-red-600 text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {updatingStatus[app.id] ? "Rejecting..." : "Reject"}
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}
@@ -173,6 +287,12 @@ const Applicants = () => {
           )}
         </div>
       </div>
+      <Toast
+        isOpen={toast.isOpen}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast({ ...toast, isOpen: false })}
+      />
     </div>
   );
 };

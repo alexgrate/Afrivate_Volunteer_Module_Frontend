@@ -1,40 +1,194 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
-import { getPathfinderById } from "../../utils/pathfinderData";
+import { bookmarks, profile, applications } from "../../services/api";
 
 const PathfinderProfile = () => {
   const navigate = useNavigate();
   const { id } = useParams();
+  const location = useLocation();
+  const opportunityId = location.state?.opportunityId;
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [pathfinder, setPathfinder] = useState(null);
+  const [bookmarkId, setBookmarkId] = useState(null);
+  const [enablerId, setEnablerId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Set page title
   useEffect(() => {
     document.title = "Pathfinder Profile - AfriVate";
   }, []);
 
   useEffect(() => {
-    const found = getPathfinderById(id);
-    setPathfinder(found);
-    if (found) {
-      const bookmarked = JSON.parse(localStorage.getItem('bookmarkedPathfinders') || '[]');
-      setIsBookmarked(bookmarked.includes(found.id) || bookmarked.includes(String(found.id)));
-    }
-  }, [id]);
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        let data;
+        
+        // If viewing an applicant within an opportunity context, use the applicant profile endpoint
+        if (opportunityId) {
+          try {
+            // Use the opportunity ID to fetch applicant profile
+            data = await applications.getApplicantProfile(opportunityId, id);
+          } catch (err) {
+            console.log("Could not fetch applicant profile, using regular pathfinder profile:", err);
+            data = await profile.pathfinderGetById(id);
+          }
+        } else {
+          data = await profile.pathfinderGetById(id);
+        }
+        if (data) {
+          const base = data.base_details || {};
+          const name =
+            [data.first_name, data.last_name].filter(Boolean).join(" ") ||
+            data.name ||
+            base.contact_email ||
+            "Pathfinder";
+          const role = data.title || "Pathfinder";
+          const locationParts = [base.address, base.state, base.country].filter(Boolean);
+          const location = locationParts.join(", ");
+          const languages = data.languages || "";
+          const about = data.about || base.bio || "";
+          const skills = Array.isArray(data.skills)
+            ? data.skills
+                .map((s) =>
+                  typeof s === "string" ? s : s?.name || s?.skill || ""
+                )
+                .filter(Boolean)
+            : [];
+          const education = Array.isArray(data.educations)
+            ? data.educations
+                .map((e) =>
+                  typeof e === "string"
+                    ? e
+                    : e?.name || e?.institution || e?.degree || ""
+                )
+                .filter(Boolean)
+            : [];
+          const certifications = Array.isArray(data.certifications)
+            ? data.certifications
+                .map((c) =>
+                  typeof c === "string"
+                    ? c
+                    : c?.name || c?.title || c?.certificate || ""
+                )
+                .filter(Boolean)
+            : [];
+          const workExperience = data.work_experience
+            ? [data.work_experience]
+            : [];
+          const email = base.contact_email || data.gmail || "";
 
-  const handleBookmark = () => {
-    const bookmarked = JSON.parse(localStorage.getItem('bookmarkedPathfinders') || '[]');
-    if (isBookmarked) {
-      const updated = bookmarked.filter(bId => bId !== pathfinder.id && bId !== String(pathfinder.id));
-      localStorage.setItem('bookmarkedPathfinders', JSON.stringify(updated));
-      setIsBookmarked(false);
-    } else {
-      const updated = [...bookmarked.filter(bId => bId !== pathfinder.id && bId !== String(pathfinder.id)), pathfinder.id];
-      localStorage.setItem('bookmarkedPathfinders', JSON.stringify(updated));
-      setIsBookmarked(true);
+          setPathfinder({
+            id: data.id,
+            name,
+            role,
+            location,
+            languages,
+            about,
+            skills,
+            education,
+            certifications,
+            workExperience,
+            email,
+          });
+          if (data.id != null) {
+            checkBookmarkStatus(data.id);
+          }
+        } else {
+          setPathfinder(null);
+        }
+      } catch (err) {
+        console.error("Error loading pathfinder profile:", err);
+        setError("Could not load pathfinder profile.");
+        setPathfinder(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+    if (id) load();
+  }, [id, opportunityId]);
+
+  const checkBookmarkStatus = async (pathfinderId) => {
+    try {
+      // Ensure we have the current enabler id (profile.enablerGet returns the enabler profile)
+      let myEnablerId = enablerId;
+      if (!myEnablerId) {
+        try {
+          const me = await profile.enablerGet();
+          if (me && me.id != null) {
+            myEnablerId = me.id;
+            setEnablerId(me.id);
+          }
+        } catch (_) {
+          // ignore - bookmark check will still try to match by pathfinder alone
+        }
+      }
+
+      const bookmarksList = await bookmarks.list();
+      const foundBookmark = bookmarksList.find((b) =>
+        b.pathfinder && String(b.pathfinder) === String(pathfinderId) &&
+        (!myEnablerId || String(b.enabler) === String(myEnablerId))
+      );
+      if (foundBookmark) {
+        setIsBookmarked(true);
+        setBookmarkId(foundBookmark.id);
+      }
+    } catch (err) {
+      console.error('Error checking bookmark status:', err);
     }
   };
+
+  const handleBookmark = async () => {
+    if (isBookmarked && bookmarkId) {
+      try {
+        await bookmarks.delete(bookmarkId);
+        setIsBookmarked(false);
+        setBookmarkId(null);
+      } catch (err) {
+        console.error('Error removing bookmark:', err);
+      }
+    } else {
+      try {
+        // Ensure we include the enabler id in the payload so backend can validate ownership
+        let myEnablerId = enablerId;
+        if (!myEnablerId) {
+          try {
+            const me = await profile.enablerGet();
+            if (me && me.id != null) {
+              myEnablerId = me.id;
+              setEnablerId(me.id);
+            }
+          } catch (_) {}
+        }
+
+        const payload = { pathfinder: pathfinder.id };
+        if (myEnablerId) payload.enabler = myEnablerId;
+
+        const newBookmark = await bookmarks.create(payload);
+        if (newBookmark && newBookmark.id) {
+          setIsBookmarked(true);
+          setBookmarkId(newBookmark.id);
+        }
+      } catch (err) {
+        console.error('Error creating bookmark:', err, err?.body || err?.response || null);
+      }
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-white font-sans">
+        <EnablerNavbar />
+        <div className="pt-20 px-4 md:px-8 lg:px-12 pb-8">
+          <div className="max-w-4xl mx-auto text-center py-12">
+            <p className="text-gray-500">Loading profile...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!pathfinder) {
     return (
@@ -89,12 +243,14 @@ const PathfinderProfile = () => {
                 </svg>
               )}
             </button>
-            <button
-              onClick={() => navigate(`/enabler/contact/${pathfinder.id}`)}
-              className="bg-[#6A00B1] text-white px-6 py-2.5 rounded-lg text-sm md:text-base font-semibold hover:bg-[#5A0091] transition-colors"
-            >
-              Contact
-            </button>
+            {pathfinder.email && (
+              <a
+                href={`mailto:${pathfinder.email}`}
+                className="bg-[#6A00B1] text-white px-6 py-2.5 rounded-lg text-sm md:text-base font-semibold hover:bg-[#5A0091] transition-colors"
+              >
+                Contact
+              </a>
+            )}
           </div>
 
           {/* Profile Header Section */}

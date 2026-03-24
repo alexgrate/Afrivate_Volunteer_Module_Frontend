@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import bgimg1 from '../Assets/Beck logo black 1.png';
 import police from '../Assets/mdi_police-badge.png';
 import NavBar from '../components/auth/Navbar';
+import { profile } from '../services/api';
 
 const defaultCompanyData = {
   name: "TECH INNOVATORS INC",
@@ -43,10 +44,22 @@ export default function CompanyProfile() {
   const [companyData, setCompanyData] = useState(defaultCompanyData);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("enablerProfile");
-      if (saved) setCompanyData(buildFromEnablerProfile(JSON.parse(saved)));
-    } catch (_) {}
+    const loadProfile = async () => {
+      try {
+        const profileData = await profile.enablerGet();
+        if (profileData) {
+          setCompanyData(buildFromEnablerProfile(profileData));
+        }
+      } catch (err) {
+        console.error('Error loading profile:', err);
+        // Fallback to localStorage
+        try {
+          const saved = localStorage.getItem("enablerProfile");
+          if (saved) setCompanyData(buildFromEnablerProfile(JSON.parse(saved)));
+        } catch (_) {}
+      }
+    };
+    loadProfile();
   }, []);
 
   return (

@@ -1,45 +1,51 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
-import { pathfinderDataById } from "../../utils/pathfinderData";
+import { bookmarks } from "../../services/api";
 
 const EnablerPathfinderBookmarks = () => {
   const navigate = useNavigate();
   const [pathfinders, setPathfinders] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     document.title = "Bookmarked Pathfinders - AfriVate";
-    const bookmarkedIds = JSON.parse(localStorage.getItem("bookmarkedPathfinders") || "[]");
-    const apps = JSON.parse(localStorage.getItem("pathfinderApplications") || "[]");
-    const appById = {};
-    apps.forEach((a) => { appById[a.id] = a; appById[String(a.id)] = a; });
-    const list = bookmarkedIds
-      .map((id) => {
-        let pf = pathfinderDataById[id] || pathfinderDataById[String(id)];
-        if (pf) return pf;
-        const numId = typeof id === "string" ? parseInt(id, 10) : id;
-        if (!Number.isNaN(numId)) pf = pathfinderDataById[numId];
-        if (pf) return pf;
-        const app = appById[id] || appById[String(id)];
-        if (!app) return null;
-        pf = {
-          id: app.id,
-          name: app.pathfinderName || "Applicant",
-          role: "Pathfinder",
-          location: "",
-        };
-        pathfinderDataById[app.id] = pf;
-        return pf;
-      })
-      .filter(Boolean);
-    setPathfinders(list);
+    
+    const loadBookmarks = async () => {
+      setLoading(true);
+      try {
+        const data = await bookmarks.list();
+        
+        if (Array.isArray(data)) {
+          // Map bookmark data to pathfinder format
+          const list = data.map((bookmark) => ({
+            id: bookmark.id || bookmark.pathfinder?.id,
+            name: bookmark.pathfinder_name || bookmark.pathfinder?.first_name + " " + bookmark.pathfinder?.last_name || "Pathfinder",
+            role: "Pathfinder",
+            location: bookmark.pathfinder?.location || "",
+          }));
+          setPathfinders(list);
+        } else {
+          setPathfinders([]);
+        }
+      } catch (err) {
+        console.error("Error loading bookmarks:", err);
+        setPathfinders([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadBookmarks();
   }, []);
 
-  const handleRemoveBookmark = (pathfinderId) => {
-    const bookmarked = JSON.parse(localStorage.getItem("bookmarkedPathfinders") || "[]");
-    const updated = bookmarked.filter((bId) => bId !== pathfinderId && String(bId) !== String(pathfinderId));
-    localStorage.setItem("bookmarkedPathfinders", JSON.stringify(updated));
-    setPathfinders((prev) => prev.filter((p) => p.id !== pathfinderId));
+  const handleRemoveBookmark = async (bookmarkId) => {
+    try {
+      await bookmarks.delete(bookmarkId);
+      setPathfinders((prev) => prev.filter((p) => p.id !== bookmarkId));
+    } catch (err) {
+      console.error("Error removing bookmark:", err);
+    }
   };
 
   return (
@@ -52,7 +58,12 @@ const EnablerPathfinderBookmarks = () => {
             Pathfinders you have saved. View their profiles or contact them.
           </p>
 
-          {pathfinders.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent mx-auto"></div>
+              <p className="text-gray-600 mt-4">Loading bookmarks...</p>
+            </div>
+          ) : pathfinders.length === 0 ? (
             <div className="bg-gray-50 rounded-[30px] p-8 md:p-12 border border-gray-200 text-center">
               <i className="fa fa-bookmark text-4xl text-gray-300 mb-4"></i>
               <p className="text-gray-600 mb-2">No bookmarked pathfinders yet.</p>

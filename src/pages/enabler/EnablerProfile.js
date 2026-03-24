@@ -1,270 +1,316 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
-import * as api from "../../services/api";
-
-const defaultCompanyData = {
-  name: "",
-  logo: "",
-  description: "",
-  details: {
-    industry: "",
-    size: "",
-    founded: "",
-    location: "",
-  },
-  website: "",
-  about: {
-    mission: "",
-    values: "",
-    sector: "",
-  },
-  employerBrand: "",
-  badges: [],
-  impactMetrics: {
-    volunteersHosted: 0,
-    jobsOffered: 0,
-  },
-};
-
-function buildCompanyDataFromEnablerProfile(profile) {
-  if (!profile || !profile.name) return defaultCompanyData;
-  return {
-    name: (profile.name || "").toUpperCase(),
-    logo: profile.profilePictureDataUrl || "",
-    description: profile.bio || "",
-    details: {
-      industry: profile.role || "",
-      size: profile.employees ? `${profile.employees} employees` : "",
-      founded: profile.createdAt ? new Date(profile.createdAt).getFullYear().toString() : "",
-      location: [profile.address, profile.state, profile.country].filter(Boolean).join(", ") || "",
-    },
-    website: profile.website || "",
-    about: {
-      mission: profile.bio || "",
-      values: "",
-      sector: profile.role || "",
-    },
-    employerBrand: profile.bio || "",
-    badges: [],
-    impactMetrics: { volunteersHosted: 0, jobsOffered: 0 },
-  };
-}
-
-function mapApiEnablerToProfile(data) {
-  if (!data) return null;
-  const base = data.base_details || {};
-  return {
-    name: data.name,
-    bio: base.bio,
-    profilePictureDataUrl: base.profile_pic,
-    email: base.contact_email,
-    country: base.country,
-    state: base.state,
-    phoneNumber: base.phone_number,
-    website: base.website,
-    address: base.address,
-    employees: base.employees,
-    role: base.role,
-    createdAt: base.created_at,
-  };
-}
+import Toast from "../../components/common/Toast";
+import { profile } from "../../services/api";
 
 const EnablerProfile = () => {
   const navigate = useNavigate();
-  const [companyData, setCompanyData] = useState(defaultCompanyData);
-
-  const loadProfile = useCallback(async () => {
-    try {
-      const data = await api.profile.enablerGet();
-      const profile = mapApiEnablerToProfile(data);
-      if (profile) {
-        setCompanyData(buildCompanyDataFromEnablerProfile(profile));
-        return;
-      }
-    } catch (_) {}
-    try {
-      const saved = localStorage.getItem("enablerProfile");
-      if (saved) {
-        const profile = JSON.parse(saved);
-        setCompanyData(buildCompanyDataFromEnablerProfile(profile));
-      }
-    } catch (e) {
-      console.error("Error loading enabler profile:", e);
-    }
-  }, []);
+  const [profileData, setProfileData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [credentials, setCredentials] = useState([]);
+  const [credentialsLoading, setCredentialsLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [toast, setToast] = useState({ isOpen: false, message: "", type: "success" });
 
   useEffect(() => {
-    document.title = "Enabler Profile - AfriVate";
+    document.title = "Profile - AfriVate";
     loadProfile();
-  }, [loadProfile]);
+    loadCredentials();
+  }, []);
+
+  const loadProfile = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await profile.enablerGet();
+      setProfileData(data);
+    } catch (err) {
+      console.error("Error loading profile:", err);
+      setError(err.message || "Failed to load profile");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadCredentials = async () => {
+    setCredentialsLoading(true);
+    try {
+      const data = await profile.credentialsList();
+      setCredentials(data || []);
+    } catch (err) {
+      console.error("Error loading credentials:", err);
+      // Don't show error for credentials - they might not exist yet
+    } finally {
+      setCredentialsLoading(false);
+    }
+  };
+
+  const handleDocumentUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const documentName = prompt("Enter document name (e.g., International Passport, Driver's License):");
+    if (!documentName) {
+      e.target.value = ""; // Reset input
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("document_name", documentName);
+      formData.append("document", file);
+
+      await profile.credentialsCreate(formData);
+      
+      setToast({ 
+        isOpen: true, 
+        message: "Document uploaded successfully!", 
+        type: "success" 
+      });
+      
+      // Reload credentials to show the new one
+      await loadCredentials();
+    } catch (err) {
+      console.error("Error uploading document:", err);
+      setToast({ 
+        isOpen: true, 
+        message: err.message || "Failed to upload document. Please try again.", 
+        type: "error" 
+      });
+    } finally {
+      setUploading(false);
+      e.target.value = ""; // Reset input
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-white font-sans">
+        <EnablerNavbar />
+        <div className="pt-20 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent mx-auto"></div>
+          <p className="text-gray-600 mt-4">Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-white font-sans">
+        <EnablerNavbar />
+        <div className="pt-20 px-4 text-center">
+          <p className="text-red-600">{error}</p>
+          <button
+            onClick={loadProfile}
+            className="mt-4 text-[#6A00B1] hover:underline"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const base = profileData?.base_details || {};
 
   return (
     <div className="min-h-screen bg-white font-sans">
       <EnablerNavbar />
       
       {/* Main Content */}
-      <div className="pt-20 px-4 md:px-8 lg:px-12 pb-8">
-        <div className="max-w-6xl mx-auto">
-          
-          {/* Back Button */}
-          <button
-            onClick={() => navigate(-1)}
-            className="mb-4 text-[#6A00B1] hover:text-[#5A0091] transition-colors"
-          >
-            <i className="fa fa-arrow-left text-xl"></i>
-          </button>
-
-          {/* Profile Header Section */}
-          <div className="flex flex-col md:flex-row md:items-start gap-4 md:gap-6 mb-8">
-            {/* Company Logo */}
-            <div className="w-20 h-20 md:w-24 md:h-24 bg-white border-2 border-gray-200 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
-              {companyData.logo ? (
-                <img src={companyData.logo} alt="Company" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-12 h-12 bg-black rounded"></div>
-              )}
-            </div>
-
-            {/* Company Info */}
-            <div className="flex-1 min-w-0">
-              <h1 className="text-2xl sm:text-3xl font-bold text-black mb-2">
-                {companyData.name}
-              </h1>
-              <p className="text-gray-700 text-sm md:text-base mb-3">
-                {companyData.description}
-              </p>
-              <p className="text-gray-600 text-xs md:text-sm mb-1">
-                {companyData.details.industry} | {companyData.details.size} | Founded {companyData.details.founded}
-              </p>
-              <p className="text-gray-600 text-xs md:text-sm mb-4">
-                Location: {companyData.details.location}
-              </p>
+      <div className="pt-20 px-4 md:px-8 pb-8">
+        <div className="max-w-4xl mx-auto">
+          {/* Profile Header Card */}
+          <div className="bg-[#6A00B1] rounded-[30px] p-6 md:p-8 text-white mb-6">
+            <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
+              {/* Profile Picture */}
+              <div className="w-24 h-24 md:w-32 md:h-32 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+                {base.profile_pic ? (
+                  <img 
+                    src={base.profile_pic} 
+                    alt={profileData?.name || "Profile"} 
+                    className="w-full h-full rounded-full object-cover"
+                  />
+                ) : (
+                  <i className="fa fa-building text-4xl md:text-5xl text-white/60"></i>
+                )}
+              </div>
               
-              {/* Website Button */}
-              <button className="bg-[#6A00B1] text-white px-4 py-2 rounded-lg text-xs md:text-sm font-medium hover:bg-[#5A0091] transition-colors mb-4 md:mb-0">
-                {companyData.website}
+              {/* Profile Info */}
+              <div className="text-center md:text-left flex-1">
+                <h1 className="text-2xl md:text-3xl font-bold mb-1">
+                  {profileData?.name || "Enabler"}
+                </h1>
+                {profileData?.role && (
+                  <p className="text-white/80 mb-2">{profileData.role}</p>
+                )}
+                {base.bio && (
+                  <p className="text-white/90 text-sm max-w-xl">{base.bio}</p>
+                )}
+              </div>
+
+              {/* Edit Button */}
+              <button
+                onClick={() => navigate("/enabler/edit-profile")}
+                className="bg-white text-[#6A00B1] px-4 py-2 rounded-lg font-semibold hover:bg-white/90 transition-colors"
+              >
+                Edit Profile
               </button>
             </div>
-
-            {/* Edit Profile Button */}
-            <button
-              onClick={() => navigate('/enabler/edit-profile')}
-              className="bg-[#6A00B1] text-white px-4 md:px-6 py-2 md:py-2.5 rounded-lg text-xs md:text-sm font-semibold hover:bg-[#5A0091] transition-colors flex items-center gap-2 whitespace-nowrap self-start md:self-auto"
-            >
-              <i className="fa fa-pencil text-xs"></i>
-              Edit Profile
-            </button>
           </div>
 
-          {/* Main Content Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Left Column - About Us & Employer Brand */}
-            <div className="lg:col-span-2 space-y-6">
-              
-              {/* About Us Section */}
-              <div className="bg-white rounded-[30px] p-4 md:p-6 border border-gray-200">
-                <h2 className="text-xl md:text-2xl font-bold text-black mb-4">
-                  About Us
-                </h2>
-                
-                <div className="space-y-4">
-                  {/* Mission */}
-                  <div className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 pb-4 border-b border-gray-200">
-                    <h3 className="font-bold text-black text-sm md:text-base flex-shrink-0 sm:w-24">
-                      Mission
-                    </h3>
-                    <p className="text-gray-700 text-xs md:text-sm flex-1">
-                      {companyData.about.mission}
-                    </p>
+          {/* Contact & Location Details */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {/* Contact Information */}
+            <div className="bg-white rounded-[30px] p-4 md:p-6 border border-gray-200">
+              <h2 className="text-lg font-bold text-black mb-4">Contact Information</h2>
+              <div className="space-y-3">
+                {base.contact_email && (
+                  <div className="flex items-center gap-3">
+                    <i className="fa fa-envelope text-[#6A00B1] w-5"></i>
+                    <span className="text-gray-700">{base.contact_email}</span>
                   </div>
-
-                  {/* Values */}
-                  <div className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 pb-4 border-b border-gray-200">
-                    <h3 className="font-bold text-black text-sm md:text-base flex-shrink-0 sm:w-24">
-                      Values
-                    </h3>
-                    <p className="text-gray-700 text-xs md:text-sm flex-1">
-                      {companyData.about.values}
-                    </p>
+                )}
+                {base.phone_number && (
+                  <div className="flex items-center gap-3">
+                    <i className="fa fa-phone text-[#6A00B1] w-5"></i>
+                    <span className="text-gray-700">{base.phone_number}</span>
                   </div>
-
-                  {/* Sector */}
-                  <div className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4">
-                    <h3 className="font-bold text-black text-sm md:text-base flex-shrink-0 sm:w-24">
-                      Sector
-                    </h3>
-                    <p className="text-gray-700 text-xs md:text-sm flex-1">
-                      {companyData.about.sector}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Employer Brand Section */}
-              <div className="bg-white rounded-[30px] p-4 md:p-6 border border-gray-200">
-                <h2 className="text-xl md:text-2xl font-bold text-black mb-4">
-                  Employer Brand
-                </h2>
-                <p className="text-gray-700 text-xs md:text-sm leading-relaxed whitespace-pre-line">
-                  {companyData.employerBrand}
-                </p>
-              </div>
-            </div>
-
-            {/* Right Column - Verification Badges & Impact Metrics */}
-            <div className="space-y-6">
-              
-              {/* Verification Badges Section */}
-              <div>
-                <h2 className="text-xl md:text-2xl font-bold text-black mb-4">
-                  Verification Badges
-                </h2>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  {companyData.badges.map((badge, index) => (
-                    <div
-                      key={index}
-                      className="bg-[#6A00B1] text-white px-4 py-2.5 rounded-full text-xs md:text-sm font-medium flex items-center gap-2 w-fit md:w-auto"
+                )}
+                {base.website && (
+                  <div className="flex items-center gap-3">
+                    <i className="fa fa-globe text-[#6A00B1] w-5"></i>
+                    <a 
+                      href={base.website} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-[#6A00B1] hover:underline"
                     >
-                      <i className={`fa ${badge.icon} text-xs`}></i>
-                      {badge.name}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Impact Metrics Section */}
-              <div>
-                <h2 className="text-xl md:text-2xl font-bold text-black mb-4">
-                  Impact Metrics
-                </h2>
-                <div className="space-y-3">
-                  {/* Volunteers Hosted Card */}
-                  <div className="bg-white rounded-[30px] p-4 md:p-5 border border-gray-200 w-fit md:w-full">
-                    <p className="text-gray-600 text-xs md:text-sm mb-2">
-                      Volunteers Hosted
-                    </p>
-                    <p className="text-2xl sm:text-3xl font-bold text-black text-center md:text-left">
-                      {companyData.impactMetrics.volunteersHosted}
-                    </p>
+                      {base.website}
+                    </a>
                   </div>
-
-                  {/* Jobs Offered Card */}
-                  <div className="bg-white rounded-[30px] p-4 md:p-5 border border-gray-200 w-fit md:w-full">
-                    <p className="text-gray-600 text-xs md:text-sm mb-2">
-                      Jobs Offered
-                    </p>
-                    <p className="text-2xl sm:text-3xl font-bold text-black text-center md:text-left">
-                      {companyData.impactMetrics.jobsOffered}
-                    </p>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
+
+            {/* Location Information */}
+            <div className="bg-white rounded-[30px] p-4 md:p-6 border border-gray-200">
+              <h2 className="text-lg font-bold text-black mb-4">Location</h2>
+              <div className="space-y-3">
+                {base.address && (
+                  <div className="flex items-center gap-3">
+                    <i className="fa fa-map-marker text-[#6A00B1] w-5"></i>
+                    <span className="text-gray-700">{base.address}</span>
+                  </div>
+                )}
+                {base.state && (
+                  <div className="flex items-center gap-3">
+                    <i className="fa fa-map text-[#6A00B1] w-5"></i>
+                    <span className="text-gray-700">{base.state}, {base.country}</span>
+                  </div>
+                )}
+                {profileData?.employees && (
+                  <div className="flex items-center gap-3">
+                    <i className="fa fa-users text-[#6A00B1] w-5"></i>
+                    <span className="text-gray-700">{profileData.employees} employees</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Social Links */}
+          {profileData?.social_links && profileData.social_links.length > 0 && (
+            <div className="bg-white rounded-[30px] p-4 md:p-6 border border-gray-200 mb-6">
+              <h2 className="text-lg font-bold text-black mb-4">Social Links</h2>
+              <div className="flex flex-wrap gap-3">
+                {profileData.social_links.map((link, index) => (
+                  <a
+                    key={index}
+                    href={link.platform_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-purple-50 text-[#6A00B1] px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-100 transition-colors"
+                  >
+                    {link.platform_name}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Government Credentials / Documents */}
+          <div className="bg-white rounded-[30px] p-4 md:p-6 border border-gray-200">
+            <h2 className="text-lg font-bold text-black mb-4">Government Credentials / Documents</h2>
+            <p className="text-gray-600 text-sm mb-4">
+              Upload your IDs and documents for verification (e.g., International Passport, Driver's License)
+            </p>
+            
+            {/* Upload Button */}
+            <div className="mb-4">
+              <label className="inline-flex items-center px-4 py-2 bg-[#6A00B1] text-white rounded-lg cursor-pointer hover:bg-[#5A0091] transition-colors">
+                <i className="fa fa-upload mr-2"></i>
+                <span>{uploading ? "Uploading..." : "Add Document"}</span>
+                <input 
+                  type="file" 
+                  accept=".pdf,.png,.jpeg,.jpg,.jfif,.webp"
+                  onChange={handleDocumentUpload}
+                  disabled={uploading}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {/* Documents List */}
+            {credentialsLoading ? (
+              <div className="text-center py-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-2 border-purple-600 border-t-transparent mx-auto"></div>
+              </div>
+            ) : credentials && credentials.length > 0 ? (
+              <div className="space-y-3">
+                {credentials.map((cred, index) => (
+                  <div key={index} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <i className="fa fa-file-text text-[#6A00B1] text-xl"></i>
+                      <div>
+                        <p className="font-medium text-gray-800">{cred.document_name}</p>
+                        {cred.document && (
+                          <a 
+                            href={cred.document} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-sm text-[#6A00B1] hover:underline"
+                          >
+                            View Document
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    {cred.uploaded_at && (
+                      <span className="text-xs text-gray-500">
+                        {new Date(cred.uploaded_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">No documents uploaded yet.</p>
+            )}
           </div>
         </div>
       </div>
+
+      <Toast
+        isOpen={toast.isOpen}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast({ isOpen: false, message: "", type: "success" })}
+      />
     </div>
   );
 };

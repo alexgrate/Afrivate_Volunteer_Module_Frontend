@@ -2,65 +2,57 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
 import Toast from "../../components/common/Toast";
-import * as api from "../../services/api";
+import { profile } from "../../services/api";
 
 const EditProfile = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const [formData, setFormData] = useState({
     name: "",
-    country: "",
-    email: "",
-    state: "",
-    phoneNumber: "",
-    address: "",
-    website: "",
     employees: "",
     role: "",
+    // base_details fields
+    contact_email: "",
+    address: "",
+    state: "",
+    country: "",
+    phone_number: "",
+    website: "",
     bio: "",
   });
+  const [socialLinks, setSocialLinks] = useState([]);
   const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState({ isOpen: false, message: "", type: "success" });
 
   const loadProfile = useCallback(async () => {
+    setLoading(true);
     try {
-      const data = await api.profile.enablerGet();
-      const base = data.base_details || {};
-      setFormData({
-        name: data.name ?? "",
-        country: base.country ?? "",
-        email: base.contact_email ?? "",
-        state: base.state ?? "",
-        phoneNumber: base.phone_number ?? "",
-        address: base.address ?? "",
-        website: base.website ?? "",
-        employees: base.employees ?? "",
-        role: base.role ?? "",
-        bio: base.bio ?? "",
-      });
-      setProfilePhotoUrl(base.profile_pic || "");
-      return;
-    } catch (_) {}
-    try {
-      const saved = localStorage.getItem("enablerProfile");
-      if (saved) {
-        const profile = JSON.parse(saved);
+      const data = await profile.enablerGet();
+      if (data) {
+        const base = data.base_details || {};
         setFormData({
-          name: profile.name ?? "",
-          country: profile.country ?? "",
-          email: profile.email ?? "",
-          state: profile.state ?? "",
-          phoneNumber: profile.phoneNumber ?? "",
-          address: profile.address ?? "",
-          website: profile.website ?? "",
-          employees: profile.employees ?? "",
-          role: profile.role ?? "",
-          bio: profile.bio ?? "",
+          name: data.name || "",
+          employees: data.employees || "",
+          role: data.role || "",
+          contact_email: base.contact_email || "",
+          address: base.address || "",
+          state: base.state || "",
+          country: base.country || "",
+          phone_number: base.phone_number || "",
+          website: base.website || "",
+          bio: base.bio || "",
         });
-        setProfilePhotoUrl(profile.profilePictureDataUrl || "");
+        setProfilePhotoUrl(base.profile_pic || "");
+        if (Array.isArray(data.social_links)) {
+          setSocialLinks(data.social_links);
+        }
       }
-    } catch (e) {
-      console.error("Error loading enabler profile:", e);
+    } catch (err) {
+      console.error("Error loading enabler profile:", err);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -83,40 +75,89 @@ const EditProfile = () => {
   };
 
   const handleSave = async () => {
+    setSaving(true);
     try {
-      const existing = JSON.parse(localStorage.getItem("enablerProfile") || "{}");
-      const updated = {
-        ...existing,
-        ...formData,
-        profilePictureDataUrl: profilePhotoUrl || existing.profilePictureDataUrl,
-        updatedAt: new Date().toISOString(),
+      // Build base_details object - send all fields to ensure they're all saved
+      const baseDetailsData = {
+        contact_email: formData.contact_email || "",
+        phone_number: formData.phone_number || "",
+        address: formData.address || "",
+        state: formData.state || "",
+        country: formData.country || "",
+        website: formData.website || "",
+        bio: formData.bio || "",
       };
-      localStorage.setItem("enablerProfile", JSON.stringify(updated));
 
-      try {
-        const base_details = {
-          bio: formData.bio || "",
-          country: formData.country || "",
-          contact_email: formData.email || "",
-          phone_number: formData.phoneNumber || "",
-          website: formData.website || "",
-          address: formData.address || "",
-          state: formData.state || "",
-          city: "",
-        };
-        await api.profile.enablerUpdate({
-          name: formData.name || "Enabler",
-          base_details,
-          social_links: [],
-        });
-      } catch (_) {}
+      // Build the full profile data
+      const profileData = {
+        name: formData.name || "Enabler",
+        employees: formData.employees || null,
+        role: formData.role || null,
+        base_details: baseDetailsData,
+        social_links: socialLinks,
+      };
+
+      console.log("Saving profile with data:", JSON.stringify(profileData, null, 2));
+
+      // Try PATCH first for partial update (more forgiving)
+      await profile.enablerPatch(profileData);
 
       setToast({ isOpen: true, message: "Profile updated successfully!", type: "success" });
       setTimeout(() => navigate("/enabler/profile"), 1200);
-    } catch (e) {
-      setToast({ isOpen: true, message: "Failed to save. Try again.", type: "error" });
+    } catch (err) {
+      console.error("Error saving profile with PATCH, trying PUT:", err);
+      try {
+        // Fallback to PUT if PATCH fails
+        const profileData = {
+          name: formData.name || "Enabler",
+          employees: formData.employees || null,
+          role: formData.role || null,
+          base_details: {
+            contact_email: formData.contact_email || "",
+            phone_number: formData.phone_number || "",
+            address: formData.address || "",
+            state: formData.state || "",
+            country: formData.country || "",
+            website: formData.website || "",
+            bio: formData.bio || "",
+          },
+          social_links: socialLinks,
+        };
+        await profile.enablerUpdate(profileData);
+        setToast({ isOpen: true, message: "Profile updated successfully!", type: "success" });
+        setTimeout(() => navigate("/enabler/profile"), 1200);
+      } catch (putErr) {
+        console.error("Error saving profile with PUT:", putErr);
+        setToast({ isOpen: true, message: putErr.message || "Failed to save profile. Please try again.", type: "error" });
+      }
+    } finally {
+      setSaving(false);
     }
   };
+
+  const addSocialLink = () => {
+    const platform = prompt("Platform name (e.g., LinkedIn, Twitter):");
+    const url = prompt("Platform URL:");
+    if (platform && url) {
+      setSocialLinks([...socialLinks, { platform_name: platform, platform_url: url }]);
+    }
+  };
+
+  const removeSocialLink = (index) => {
+    setSocialLinks(socialLinks.filter((_, i) => i !== index));
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-white font-sans">
+        <EnablerNavbar />
+        <div className="pt-20 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent mx-auto"></div>
+          <p className="text-gray-600 mt-4">Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white font-sans">
@@ -152,36 +193,70 @@ const EditProfile = () => {
               </button>
             </div>
 
+            {/* Organization Name */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Organization Name *</label>
               <input
                 type="text"
                 name="name"
                 value={formData.name}
                 onChange={handleInputChange}
-                placeholder="Company or your name"
+                placeholder="Company or Organization name"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                required
               />
             </div>
+
+            {/* Bio */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
               <textarea
                 name="bio"
                 value={formData.bio}
                 onChange={handleInputChange}
-                placeholder="Short bio"
+                placeholder="Short description about your organization"
                 rows="3"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm resize-none"
               />
             </div>
+
+            {/* Contact Information */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email *</label>
+                <input
+                  type="email"
+                  name="contact_email"
+                  value={formData.contact_email}
+                  onChange={handleInputChange}
+                  placeholder="contact@company.com"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                <input
+                  type="tel"
+                  name="phone_number"
+                  value={formData.phone_number}
+                  onChange={handleInputChange}
+                  placeholder="+234..."
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Location */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Country *</label>
                 <select
                   name="country"
                   value={formData.country}
                   onChange={handleInputChange}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm bg-white"
+                  required
                 >
                   <option value="">Select country</option>
                   <option value="Nigeria">Nigeria</option>
@@ -189,23 +264,11 @@ const EditProfile = () => {
                   <option value="Ghana">Ghana</option>
                   <option value="South Africa">South Africa</option>
                   <option value="Tanzania">Tanzania</option>
+                  <option value="Other">Other</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input
-                  type="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  placeholder="Email"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">State *</label>
                 <input
                   type="text"
                   name="state"
@@ -213,66 +276,92 @@ const EditProfile = () => {
                   onChange={handleInputChange}
                   placeholder="State"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                <input
-                  type="tel"
-                  name="phoneNumber"
-                  value={formData.phoneNumber}
-                  onChange={handleInputChange}
-                  placeholder="Phone"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                  required
                 />
               </div>
             </div>
+
+            {/* Address */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Address *</label>
               <input
                 type="text"
                 name="address"
                 value={formData.address}
                 onChange={handleInputChange}
-                placeholder="Address"
+                placeholder="Full address"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                required
               />
             </div>
+
+            {/* Website */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
               <input
-                type="text"
+                type="url"
                 name="website"
                 value={formData.website}
                 onChange={handleInputChange}
-                placeholder="Website"
+                placeholder="https://company.com"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
               />
             </div>
+
+            {/* Company Details */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Employees</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Number of Employees</label>
                 <input
                   type="text"
                   name="employees"
                   value={formData.employees}
                   onChange={handleInputChange}
-                  placeholder="e.g. 10-50"
+                  placeholder="e.g. 50"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Your role</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Your Role</label>
                 <input
                   type="text"
                   name="role"
                   value={formData.role}
                   onChange={handleInputChange}
-                  placeholder="e.g. Programme Manager"
+                  placeholder="e.g. CEO, Programme Manager"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
                 />
               </div>
             </div>
+
+            {/* Social Links */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Social Links</label>
+              {socialLinks.length > 0 && (
+                <div className="space-y-2 mb-2">
+                  {socialLinks.map((link, index) => (
+                    <div key={index} className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                      <span className="text-sm">{link.platform_name}: {link.platform_url}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeSocialLink(index)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        <i className="fa fa-times"></i>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={addSocialLink}
+                className="text-[#6A00B1] text-sm font-semibold hover:underline"
+              >
+                + Add Social Link
+              </button>
+            </div>
+
             <div className="flex gap-3 pt-4">
               <button
                 type="button"
@@ -284,9 +373,10 @@ const EditProfile = () => {
               <button
                 type="button"
                 onClick={handleSave}
-                className="bg-[#6A00B1] text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-[#5A0091] transition-colors"
+                disabled={saving}
+                className="bg-[#6A00B1] text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-[#5A0091] transition-colors disabled:opacity-50"
               >
-                Save profile
+                {saving ? 'Saving...' : 'Save profile'}
               </button>
             </div>
           </div>

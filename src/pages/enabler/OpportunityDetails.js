@@ -1,6 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
+import FormattedText from "../../components/common/FormattedText";
+import { opportunities } from "../../services/api";
+import { getOrgName } from "../../utils/opportunityUtils";
+import { parseDescription } from "../../utils/descriptionUtils";
 
 const OpportunityDetails = () => {
   const navigate = useNavigate();
@@ -8,41 +12,76 @@ const OpportunityDetails = () => {
   const [opportunity, setOpportunity] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Extract numeric ID from slug format (e.g., "123-volunteer-position" -> "123")
+  const extractNumericId = (idParam) => {
+    if (!idParam) return null;
+    const match = idParam.match(/^(\d+)/);
+    return match ? match[1] : idParam;
+  };
+
+  const numericId = extractNumericId(id);
+
   // Set page title
   useEffect(() => {
     document.title = "Opportunity Details - AfriVate";
   }, []);
 
-  // Load opportunity data from localStorage
+  // Load opportunity data
   useEffect(() => {
-    setLoading(true);
-    // Try to get from localStorage first (from CreateOpportunity or OpportunitiesPosted)
-    const savedOpportunities = JSON.parse(localStorage.getItem('enablerOpportunities') || '[]');
-    const found = savedOpportunities.find(opp => opp.id === id || opp.id === String(id));
-    
-    if (found) {
-      setOpportunity({
-        id: found.id,
-        title: found.title || "",
-        company: found.company || "",
-        type: found.type || "",
-        description: found.description || "",
-        responsibilities: Array.isArray(found.responsibilities) ? found.responsibilities : 
-                         (found.responsibilities ? [found.responsibilities] : []),
-        qualifications: Array.isArray(found.qualifications) ? found.qualifications : 
-                       (found.qualifications ? [found.qualifications] : []),
-        aboutCompany: found.aboutCompany || "",
-        applicationInstructions: found.applicationInstructions || "",
-        jobType: found.jobType || "",
-        location: found.location || "",
-        workModel: found.workModel || "",
-        timeCommitment: found.timeCommitment || ""
-      });
-    } else {
-      setOpportunity(null);
-    }
-    setLoading(false);
-  }, [id]);
+    const loadOpportunity = async () => {
+      setLoading(true);
+      
+      // First, try to get from localStorage
+      const savedOpportunities = JSON.parse(localStorage.getItem('enablerOpportunities') || '[]');
+      let found = savedOpportunities.find(opp => 
+        String(opp.id) === numericId || 
+        String(opp.id) === id ||
+        opp.id === numericId ||
+        opp.id === id
+      );
+
+      // If not found in localStorage, try API
+      if (!found && numericId) {
+        try {
+          const apiData = await opportunities.get(numericId);
+          if (apiData && apiData.id) {
+            found = {
+              id: apiData.id,
+              title: apiData.title || "",
+              company: getOrgName(apiData),
+              type: apiData.opportunity_type || "",
+              rawDescription: apiData.description || "",
+              jobType: apiData.opportunity_type || "",
+            };
+          }
+        } catch (err) {
+          console.error("Error fetching opportunity from API:", err);
+        }
+      }
+      
+      if (found) {
+        setOpportunity({
+          id: found.id,
+          title: found.title || "",
+          company: found.company || "",
+          type: found.type || "",
+          rawDescription: found.rawDescription || found.description || "",
+          jobType: found.jobType || found.type || "",
+        });
+      } else {
+        setOpportunity(null);
+      }
+      setLoading(false);
+    };
+
+    loadOpportunity();
+  }, [id, numericId]);
+
+  // Parse the description into separate sections
+  const parsedDescription = useMemo(() => {
+    if (!opportunity?.rawDescription) return parseDescription("");
+    return parseDescription(opportunity.rawDescription);
+  }, [opportunity?.rawDescription]);
 
   if (loading) {
     return (
@@ -129,101 +168,103 @@ const OpportunityDetails = () => {
               <div className="bg-white rounded-lg p-4 md:p-6 border border-gray-200">
                 <div className="flex items-center gap-2 mb-4">
                   <h2 className="text-xl md:text-2xl font-bold text-black">
-                    Volunteering Description
+                    Description
                   </h2>
                   <button
-                    onClick={() => navigate(`/enabler/edit-opportunity/${opportunity.id}?section=description`)}
+                    onClick={() => navigate(`/enabler/edit-opportunity/${opportunity.id}`)}
                     className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
                   >
                     <i className="fa fa-pencil text-sm"></i>
                   </button>
                 </div>
-                <p className="text-gray-700 text-sm md:text-base leading-relaxed">
-                  {opportunity.description}
-                </p>
+                <div className="text-sm md:text-base">
+                  {parsedDescription.description ? (
+                    <FormattedText text={parsedDescription.description} />
+                  ) : (
+                    <p className="text-gray-500 italic">No description provided.</p>
+                  )}
+                </div>
               </div>
 
               {/* Key Responsibilities */}
-              <div className="bg-white rounded-lg p-4 md:p-6 border border-gray-200">
-                <div className="flex items-center gap-2 mb-4">
-                  <h2 className="text-xl md:text-2xl font-bold text-black">
-                    Key Responsibilities
-                  </h2>
-                  <button
-                    onClick={() => navigate(`/enabler/edit-opportunity/${opportunity.id}?section=responsibilities`)}
-                    className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
-                  >
-                    <i className="fa fa-pencil text-sm"></i>
-                  </button>
+              {parsedDescription.keyResponsibilities && (
+                <div className="bg-white rounded-lg p-4 md:p-6 border border-gray-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <h2 className="text-xl md:text-2xl font-bold text-black">
+                      Key Responsibilities
+                    </h2>
+                    <button
+                      onClick={() => navigate(`/enabler/edit-opportunity/${opportunity.id}`)}
+                      className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
+                    >
+                      <i className="fa fa-pencil text-sm"></i>
+                    </button>
+                  </div>
+                  <div className="text-sm md:text-base">
+                    <FormattedText text={parsedDescription.keyResponsibilities} />
+                  </div>
                 </div>
-                <ul className="space-y-2">
-                  {opportunity.responsibilities.map((responsibility, index) => (
-                    <li key={index} className="text-gray-700 text-sm md:text-base flex items-start gap-2">
-                      <span className="text-[#6A00B1] mt-1">•</span>
-                      <span>{responsibility}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              )}
 
-              {/* Qualifications & Requirements */}
-              <div className="bg-white rounded-lg p-4 md:p-6 border border-gray-200">
-                <div className="flex items-center gap-2 mb-4">
-                  <h2 className="text-xl md:text-2xl font-bold text-black">
-                    Qualifications & Requirements
-                  </h2>
-                  <button
-                    onClick={() => navigate(`/enabler/edit-opportunity/${opportunity.id}?section=qualifications`)}
-                    className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
-                  >
-                    <i className="fa fa-pencil text-sm"></i>
-                  </button>
+              {/* Requirements & Benefits */}
+              {parsedDescription.requirementsBenefits && (
+                <div className="bg-white rounded-lg p-4 md:p-6 border border-gray-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <h2 className="text-xl md:text-2xl font-bold text-black">
+                      Requirements & Benefits
+                    </h2>
+                    <button
+                      onClick={() => navigate(`/enabler/edit-opportunity/${opportunity.id}`)}
+                      className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
+                    >
+                      <i className="fa fa-pencil text-sm"></i>
+                    </button>
+                  </div>
+                  <div className="text-sm md:text-base">
+                    <FormattedText text={parsedDescription.requirementsBenefits} />
+                  </div>
                 </div>
-                <ul className="space-y-2">
-                  {opportunity.qualifications.map((qualification, index) => (
-                    <li key={index} className="text-gray-700 text-sm md:text-base flex items-start gap-2">
-                      <span className="text-[#6A00B1] mt-1">•</span>
-                      <span>{qualification}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              )}
 
-              {/* About the Company */}
-              <div className="bg-white rounded-lg p-4 md:p-6 border border-gray-200">
-                <div className="flex items-center gap-2 mb-4">
-                  <h2 className="text-xl md:text-2xl font-bold text-black">
-                    About the Company
-                  </h2>
-                  <button
-                    onClick={() => navigate(`/enabler/edit-opportunity/${opportunity.id}?section=about`)}
-                    className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
-                  >
-                    <i className="fa fa-pencil text-sm"></i>
-                  </button>
+              {/* About the Organization */}
+              {parsedDescription.aboutCompany && (
+                <div className="bg-white rounded-lg p-4 md:p-6 border border-gray-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <h2 className="text-xl md:text-2xl font-bold text-black">
+                      About the Organization
+                    </h2>
+                    <button
+                      onClick={() => navigate(`/enabler/edit-opportunity/${opportunity.id}`)}
+                      className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
+                    >
+                      <i className="fa fa-pencil text-sm"></i>
+                    </button>
+                  </div>
+                  <div className="text-sm md:text-base">
+                    <FormattedText text={parsedDescription.aboutCompany} />
+                  </div>
                 </div>
-                <p className="text-gray-700 text-sm md:text-base leading-relaxed">
-                  {opportunity.aboutCompany}
-                </p>
-              </div>
+              )}
 
               {/* Application Instructions */}
-              <div className="bg-white rounded-lg p-4 md:p-6 border border-gray-200">
-                <div className="flex items-center gap-2 mb-4">
-                  <h2 className="text-xl md:text-2xl font-bold text-black">
-                    Application Instructions
-                  </h2>
-                  <button
-                    onClick={() => navigate(`/enabler/edit-opportunity/${opportunity.id}?section=instructions`)}
-                    className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
-                  >
-                    <i className="fa fa-pencil text-sm"></i>
-                  </button>
+              {parsedDescription.applicationInstructions && (
+                <div className="bg-white rounded-lg p-4 md:p-6 border border-gray-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <h2 className="text-xl md:text-2xl font-bold text-black">
+                      Application Instructions
+                    </h2>
+                    <button
+                      onClick={() => navigate(`/enabler/edit-opportunity/${opportunity.id}`)}
+                      className="text-[#6A00B1] hover:text-[#5A0091] transition-colors"
+                    >
+                      <i className="fa fa-pencil text-sm"></i>
+                    </button>
+                  </div>
+                  <div className="text-sm md:text-base">
+                    <FormattedText text={parsedDescription.applicationInstructions} />
+                  </div>
                 </div>
-                <p className="text-gray-700 text-sm md:text-base leading-relaxed">
-                  {opportunity.applicationInstructions}
-                </p>
-              </div>
+              )}
             </div>
 
             {/* Right Column - Job Summary */}
@@ -240,7 +281,7 @@ const OpportunityDetails = () => {
                     <div>
                       <p className="text-gray-600 text-xs md:text-sm">Job Type</p>
                       <p className="text-gray-900 font-medium text-sm md:text-base">
-                        {opportunity.jobType}
+                        {opportunity.jobType || "Volunteering"}
                       </p>
                     </div>
                   </div>
@@ -251,32 +292,32 @@ const OpportunityDetails = () => {
                     <div>
                       <p className="text-gray-600 text-xs md:text-sm">Location</p>
                       <p className="text-gray-900 font-medium text-sm md:text-base">
-                        {opportunity.location}
+                        {parsedDescription.location || "Not specified"}
                       </p>
                     </div>
                   </div>
 
                   {/* Work Model */}
-                  {opportunity.workModel && (
+                  {parsedDescription.workModel && (
                     <div className="flex items-center gap-3">
                       <i className="fa fa-laptop text-[#6A00B1] text-lg"></i>
                       <div>
                         <p className="text-gray-600 text-xs md:text-sm">Work Model</p>
                         <p className="text-gray-900 font-medium text-sm md:text-base">
-                          {opportunity.workModel}
+                          {parsedDescription.workModel}
                         </p>
                       </div>
                     </div>
                   )}
 
                   {/* Time Commitment */}
-                  {opportunity.timeCommitment && (
+                  {parsedDescription.timeCommitment && (
                     <div className="flex items-center gap-3">
                       <i className="fa fa-clock text-[#6A00B1] text-lg"></i>
                       <div>
                         <p className="text-gray-600 text-xs md:text-sm">Time Commitment</p>
                         <p className="text-gray-900 font-medium text-sm md:text-base">
-                          {opportunity.timeCommitment}
+                          {parsedDescription.timeCommitment}
                         </p>
                       </div>
                     </div>

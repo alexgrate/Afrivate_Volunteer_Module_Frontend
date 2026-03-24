@@ -1,7 +1,7 @@
 /**
  * Afrivate Backend API client
  * All paths use /api prefix (e.g. /api/auth/register/). Override with REACT_APP_API_BASE_URL in .env if needed.
- * See API_DOCS.md for full endpoint reference.
+ * Updated API implementation based on Afrivate API-1 PDF documentation.
  */
 
 const BASE_URL = (
@@ -10,10 +10,22 @@ const BASE_URL = (
 
 const API_PREFIX = process.env.REACT_APP_API_PREFIX ?? "/api";
 
-/** Turn API error body into a single user-facing string. */
+/** Flatten nested validation errors (e.g. { base_details: { contact_email: ["Required."] } }) into one string. */
+function flattenValidationErrors(obj, prefix = "") {
+  const parts = [];
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (Array.isArray(v)) parts.push(`${key}: ${v.join(", ")}`);
+    else if (typeof v === "string") parts.push(`${key}: ${v}`);
+    else if (v && typeof v === "object" && !Array.isArray(v)) parts.push(...flattenValidationErrors(v, key));
+  }
+  return parts;
+}
+
+/** Turn error response into a single user-facing message (no technical jargon). */
 export function getApiErrorMessage(err) {
   if (!err) return "Something went wrong.";
-  if (err.message && err.message !== "API request failed") return err.message;
+  if (err.message && err.message !== "Request failed") return err.message;
   const b = err.body;
   if (b && typeof b === "object") {
     if (typeof b.detail === "string") return b.detail;
@@ -21,16 +33,13 @@ export function getApiErrorMessage(err) {
     if (typeof b.error === "string") return b.error;
     if (Array.isArray(b.detail)) return b.detail.join(". ");
     if (b.non_field_errors && Array.isArray(b.non_field_errors)) return b.non_field_errors.join(". ");
-    const parts = [];
-    for (const [k, v] of Object.entries(b)) {
-      if (Array.isArray(v)) parts.push(`${k}: ${v.join(", ")}`);
-      else if (typeof v === "string") parts.push(`${k}: ${v}`);
-    }
-    if (parts.length) return parts.join(". ");
+    const flat = flattenValidationErrors(b);
+    if (flat.length) return flat.join(". ");
   }
-  if (err.status) return `Request failed (${err.status}). Check your connection or try again.`;
-  return "Cannot reach server. Check your connection or try again.";
+  if (err.status) return "Something went wrong. Please check your connection and try again.";
+  return "We couldn't connect. Please check your connection and try again.";
 }
+
 const ACCESS_KEY = "afrivate_access";
 const REFRESH_KEY = "afrivate_refresh";
 export const ROLE_KEY = "afrivate_role"; // "enabler" | "pathfinder"
@@ -62,6 +71,9 @@ export function getRole() {
   return localStorage.getItem(ROLE_KEY);
 }
 
+/** Whether we are currently retrying after a 401 refresh (avoid infinite loop). */
+let isRetryingAfter401 = false;
+
 async function request(method, path, options = {}) {
   const url = path.startsWith("http") ? path : BASE_URL + API_PREFIX + path;
   const access = getAccessToken();
@@ -69,78 +81,74 @@ async function request(method, path, options = {}) {
     "Content-Type": "application/json",
     ...(options.headers || {}),
   };
-  if (access && !headers.Authorization) headers.Authorization = `Bearer ${access}`;
-  if (options.body instanceof FormData) delete headers["Content-Type"];
+  if (access && !headers["Authorization"]) {
+    headers["Authorization"] = `Bearer ${access}`;
+  }
+
+  const config = {
+    method,
+    headers,
+  };
+
+  if (options.body !== undefined) {
+    config.body = options.body instanceof FormData ? options.body : JSON.stringify(options.body);
+  } else if (options.data !== undefined) {
+    config.body = options.data instanceof FormData ? options.data : JSON.stringify(options.data);
+  }
+
+  // Content-Type must not be set when sending FormData (browser sets multipart boundary)
+  if (config.body instanceof FormData) {
+    delete headers["Content-Type"];
+  }
 
   let res;
   try {
-    res = await fetch(url, {
-      method,
-      headers,
-      body: options.body ?? (options.data ? JSON.stringify(options.data) : undefined),
-      ...options,
-    });
-  } catch (networkErr) {
-    const msg = networkErr?.message?.toLowerCase?.().includes("fetch")
-      ? "Cannot reach server. Check your connection or try again."
-      : (networkErr?.message || "Network error.");
-    throw Object.assign(new Error(msg), { status: 0, body: null });
+    res = await fetch(url, config);
+  } catch (networkError) {
+    const err = new Error("Request failed");
+    err.status = null;
+    throw err;
   }
 
-  if (res.status === 401 && getRefreshToken()) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
-      const retryHeaders = { ...headers, Authorization: `Bearer ${getAccessToken()}` };
-      res = await fetch(url, {
-        method,
-        headers: retryHeaders,
-        body: options.body ?? (options.data ? JSON.stringify(options.data) : undefined),
-        ...options,
-      });
+  let data = null;
+  const isJson = res.headers.get("content-type")?.includes("application/json");
+  if (isJson) {
+    try {
+      data = await res.json();
+    } catch (_) {}
+  }
+
+  // On 401, try to refresh token and retry once (unless we are already retrying)
+  if (res.status === 401 && !isRetryingAfter401) {
+    const refresh = getRefreshToken();
+    if (refresh) {
+      try {
+        isRetryingAfter401 = true;
+        const tokens = await auth.tokenRefresh(refresh);
+        if (tokens && tokens.access) {
+          setTokens(tokens.access, tokens.refresh || refresh);
+          return request(method, path, options);
+        }
+      } catch (refreshErr) {
+        clearTokens();
+        const err = new Error("Session expired. Please sign in again.");
+        err.status = 401;
+        err.body = data;
+        throw err;
+      } finally {
+        isRetryingAfter401 = false;
+      }
     }
   }
 
   if (!res.ok) {
-    let body = null;
-    try {
-      const ct = res.headers.get("content-type") || "";
-      if (ct.includes("application/json")) body = await res.json();
-    } catch (_) {}
-    const err = new Error();
+    const err = new Error(data?.detail || "Request failed");
     err.status = res.status;
-    err.body = body;
-    err.message = getApiErrorMessage({ status: res.status, body });
+    err.body = data;
     throw err;
   }
 
-  const contentType = res.headers.get("content-type");
-  if (contentType && contentType.includes("application/json")) {
-    try {
-      return await res.json();
-    } catch (_) {
-      return null;
-    }
-  }
-  return res;
-}
-
-async function refreshAccessToken() {
-  const refresh = getRefreshToken();
-  if (!refresh) return false;
-  try {
-    const res = await fetch(`${BASE_URL}${API_PREFIX}/auth/token/refresh/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh }),
-    });
-    const data = res.ok ? await res.json() : null;
-    if (data && data.access) {
-      setTokens(data.access, data.refresh || refresh);
-      return true;
-    }
-  } catch (_) {}
-  clearTokens();
-  return false;
+  return data;
 }
 
 // --- Auth ---
@@ -151,23 +159,16 @@ export const auth = {
   },
 
   register(body) {
-    return request("POST", "/auth/register/", {
-      data: {
-        username: body.username,
-        email: body.email,
-        password: body.password,
-        password2: body.password2,
-        role: body.role,
-      },
-    });
+    return request("POST", "/auth/register/", { data: body });
   },
 
+  // Logout - POST with Bearer token (no body)
   logout() {
-    return request("POST", "/auth/logout/").finally(clearTokens);
+    return request("POST", "/auth/logout/");
   },
 
   token(body) {
-    return request("POST", "/auth/token/", { data: { email: body.email, password: body.password } });
+    return request("POST", "/auth/token/", { data: body });
   },
 
   tokenRefresh(refresh) {
@@ -175,58 +176,98 @@ export const auth = {
   },
 
   forgotPassword(body) {
-    return request("POST", "/auth/forgot-password/", { data: { email: body.email } });
-  },
-
-  changePassword(body) {
-    return request("POST", "/auth/change-password/", {
-      data: {
-        old_password: body.old_password,
-        new_password: body.new_password,
-        confirm_password: body.confirm_password,
-      },
-    });
-  },
-
-  verifyEmail(body) {
-    return request("POST", "/auth/verify-email/", { data: { token: body.token } });
+    return request("POST", "/auth/forgot-password/", { data: body });
   },
 
   verifyOtp(body) {
-    return request("POST", "/auth/verify-otp/", { data: { email: body.email, otp: body.otp } });
+    return request("POST", "/auth/verify-otp/", { data: body });
   },
 
-  /** Reset password after OTP (no Bearer). If backend uses different path, update here. */
   resetPassword(body) {
-    return request("POST", "/auth/reset-password/", {
-      data: {
-        email: body.email,
-        new_password: body.new_password,
-        confirm_password: body.confirm_password,
-      },
-    });
+    return request("POST", "/auth/reset-password/", { data: body });
   },
 
-  /**
-   * Exchange Google id_token for app JWT. Backend should verify id_token with Google and return access/refresh.
-   * Body: { id_token: string, role?: "enabler" | "pathfinder" } (role for new signups).
-   */
+  changePassword(body) {
+    return request("POST", "/auth/change-password/", { data: body });
+  },
+
+  verifyEmail(body) {
+    return request("POST", "/auth/verify-email/", { data: body });
+  },
+
   google(body) {
-    return request("POST", "/auth/google/", {
-      data: { id_token: body.id_token, role: body.role },
-    });
+    return request("POST", "/auth/google/", { data: body });
+  },
+
+  // NEW: Registration (alternative)
+  registration(body) {
+    return request("POST", "/auth/registration/", { data: body });
+  },
+
+  // NEW: Resend verification email
+  registrationResendEmail(body) {
+    return request("POST", "/auth/registration/resend-email/", { data: body });
+  },
+
+  // NEW: Verify email with key
+  registrationVerifyEmail(body) {
+    return request("POST", "/auth/registration/verify-email/", { data: body });
+  },
+
+  // NEW: Password change (different from forgot-password)
+  passwordChange(body) {
+    return request("POST", "/auth/password/change/", { data: body });
+  },
+
+  // NEW: Password reset request
+  passwordReset(body) {
+    return request("POST", "/auth/password/reset/", { data: body });
+  },
+
+  // NEW: Password reset confirm
+  passwordResetConfirm(body) {
+    return request("POST", "/auth/password/reset/confirm/", { data: body });
+  },
+
+  // NEW: Get user profile
+  userGet() {
+    return request("GET", "/auth/user/");
+  },
+
+  // NEW: Update user profile (full)
+  userUpdate(body) {
+    return request("PUT", "/auth/user/", { data: body });
+  },
+
+  // NEW: Update user profile (partial)
+  userPatch(body) {
+    return request("PATCH", "/auth/user/", { data: body });
+  },
+
+  // NEW: Delete user account (for both enabler and pathfinder)
+  deleteAccount() {
+    return request("DELETE", "/auth/user/");
   },
 };
 
-// --- Bookmark ---
+// --- Bookmarks ---
 
 export const bookmark = {
   list() {
     return request("GET", "/bookmark/bookmarks/");
   },
 
+  // Updated: Now accepts full opportunity object along with opportunity_id
   create(body) {
-    return request("POST", "/bookmark/bookmarks/", { data: body });
+    // build payload without sending explicit nulls (backend dislikes them)
+    const data = {};
+    if (body.opportunity) data.opportunity = body.opportunity;
+    if (body.opportunity_id != null) data.opportunity_id = body.opportunity_id;
+    if (body.enabler != null) data.enabler = body.enabler;
+    if (body.pathfinder != null) data.pathfinder = body.pathfinder;
+    // log for debug so picking up server validation errors easier
+    console.debug("bookmark.create payload", data);
+    return request("POST", "/bookmark/bookmarks/", { data });
   },
 
   delete(id) {
@@ -253,9 +294,17 @@ export const bookmark = {
   },
 
   opportunitiesSavedCreate(body) {
-    return request("POST", "/bookmark/opportunities/saved/", { data: body });
+    return request("POST", "/bookmark/opportunities/saved/", {
+      data: {
+        opportunity: body.opportunity || null,
+        opportunity_id: body.opportunity_id || body.opportunity?.id || null,
+      },
+    });
   },
 };
+
+/** Alias for backward compatibility: use bookmark (singular) or bookmarks. */
+export const bookmarks = bookmark;
 
 // --- Notifications ---
 
@@ -288,6 +337,18 @@ export const profile = {
     return request("GET", "/profile/enablerprofile/");
   },
 
+  /**
+   * Fetch enabler profile by user ID (for public org/profile view).
+   *
+   * Pathfinders use this when viewing an organization; API now exposes
+   * `/profile/enablerprofile/user/{user_id}/` which looks up the enabler
+   * record associated with the given user identifier.
+   */
+  enablerGetById(userId) {
+    return request("GET", `/profile/enablerprofile/user/${userId}/`);
+  },
+
+
   enablerCreate(body) {
     return request("POST", "/profile/enablerprofile/", { data: body });
   },
@@ -302,6 +363,11 @@ export const profile = {
 
   pathfinderGet() {
     return request("GET", "/profile/pathfinderprofile/");
+  },
+
+  /** Fetch pathfinder profile by user ID (for enabler view). Uses GET /profile/view-profile/{id}/ */
+  pathfinderGetById(id) {
+    return request("GET", `/profile/view-profile/${id}/`);
   },
 
   pathfinderCreate(body) {
@@ -326,6 +392,22 @@ export const profile = {
       headers: {},
     });
   },
+
+  /** Government Credentials / Documents: GET list, POST upload (multipart: document_name, document). */
+  credentialsList() {
+    return request("GET", "/profile/credentials/");
+  },
+
+  credentialsCreate(formData) {
+    return request("POST", "/profile/credentials/", {
+      body: formData,
+      headers: {},
+    });
+  },
+
+  credentialsDelete(id) {
+    return request("DELETE", `/profile/credentials/${id}/`);
+  },
 };
 
 // --- Waitlist ---
@@ -340,18 +422,118 @@ export const waitlist = {
   },
 };
 
+// --- Applications ---
+// Updated: Endpoint changed from /applications/api/applications/ to /applications/
+// Added: cover_letter field support
+
+export const applications = {
+  list() {
+    return request("GET", "/applications/");
+  },
+
+  // Updated: Added cover_letter to request body
+  create(body) {
+    return request("POST", "/applications/", {
+      data: {
+        opportunity: body.opportunity,
+        cover_letter: body.cover_letter || "",
+      },
+    });
+  },
+
+  get(id) {
+    return request("GET", `/applications/${id}/`);
+  },
+
+  // Updated: Added cover_letter to request body
+  update(id, body) {
+    return request("PUT", `/applications/${id}/`, {
+      data: {
+        opportunity: body.opportunity,
+        cover_letter: body.cover_letter || "",
+      },
+    });
+  },
+
+  // Updated: Added cover_letter to request body
+  patch(id, body) {
+    return request("PATCH", `/applications/${id}/`, {
+      data: {
+        opportunity: body.opportunity,
+        cover_letter: body.cover_letter || "",
+      },
+    });
+  },
+
+  delete(id) {
+    return request("DELETE", `/applications/${id}/`);
+  },
+
+  // Updated: Changed from PUT to PATCH as per new API
+  updateStatus(id, body) {
+    return request("PATCH", `/applications/${id}/change_status/`, { data: body });
+  },
+
+  // View applicant profile by opportunity (opportunityId, pathfinderId)
+  getApplicantProfile(opportunityId, pathfinderId) {
+    return request("GET", `/opportunities/opportunities/${opportunityId}/applicants/${pathfinderId}/`);
+  },
+};
+
+// --- Opportunities ---
+
+export const opportunities = {
+  list(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return request("GET", `/opportunities/opportunities/${query ? `?${query}` : ''}`);
+  },
+
+  create(body) {
+    return request("POST", "/opportunities/opportunities/", { data: body });
+  },
+
+  mine() {
+    return request("GET", "/opportunities/opportunities/mine/");
+  },
+
+  mineCreate(body) {
+    return request("POST", "/opportunities/opportunities/mine/", { data: body });
+  },
+
+  get(id) {
+    return request("GET", `/opportunities/opportunities/${id}/`);
+  },
+
+  update(id, body) {
+    return request("PUT", `/opportunities/opportunities/${id}/`, { data: body });
+  },
+
+  patch(id, body) {
+    return request("PATCH", `/opportunities/opportunities/${id}/`, { data: body });
+  },
+
+  delete(id) {
+    return request("DELETE", `/opportunities/opportunities/${id}/`);
+  },
+};
+
 const apiClient = {
   BASE_URL,
   getAccessToken,
   getRefreshToken,
   setTokens,
   clearTokens,
+  setRole,
+  getRole,
   request,
   auth,
   bookmark,
+  bookmarks: bookmark, // Alias for backward compatibility
   notifications,
   profile,
   waitlist,
+  applications,
+  opportunities,
 };
 
 export default apiClient;

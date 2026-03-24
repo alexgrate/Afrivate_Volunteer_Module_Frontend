@@ -33,22 +33,43 @@ export function GoogleAuthButton({
       const data = await api.auth.google(body);
       if (data?.access) {
         api.setTokens(data.access, data.refresh);
+        let role = null;
         try {
           const enabler = await api.profile.enablerGet();
-          if (enabler && enabler.id != null) api.setRole('enabler');
-        } catch (_) {
+          if (enabler && enabler.id != null) {
+            api.setRole('enabler');
+            role = 'enabler';
+          }
+        } catch (enablerErr) {
+          if (enablerErr.status !== 403 && enablerErr.status !== 404) {
+            const msg = api.getApiErrorMessage(enablerErr) || 'Could not load your profile';
+            if (onErrorProp) onErrorProp(msg);
+            return;
+          }
+        }
+        if (!role) {
           try {
             const pathfinder = await api.profile.pathfinderGet();
-            if (pathfinder && pathfinder.id != null) api.setRole('pathfinder');
-          } catch (__) {}
+            if (pathfinder && pathfinder.id != null) {
+              api.setRole('pathfinder');
+              role = 'pathfinder';
+            }
+          } catch (pathfinderErr) {
+            const msg = api.getApiErrorMessage(pathfinderErr) || 'Could not load your profile';
+            if (onErrorProp) onErrorProp(pathfinderErr.status === 403 ? (msg || 'Access denied. This account does not have pathfinder access.') : msg);
+            return;
+          }
+        }
+        if (!role) {
+          if (onErrorProp) onErrorProp('Could not determine your account type. Please contact support.');
+          return;
         }
         await refetchUser();
         if (mode === 'signup') {
           if (role === 'enabler') {
             navigate('/enabler/profile-setup');
           } else {
-            localStorage.setItem('hasCompletedProfile', 'false');
-            navigate('/edit-new-profile');
+            navigate('/pathfinder/profile-setup');
           }
         } else {
           const r = api.getRole();

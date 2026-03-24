@@ -1,25 +1,64 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useUser } from '../../context/UserContext';
+import { profile, getRole } from '../../services/api';
 
 const NavBar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
   const { user, logout } = useUser();
+  const [profileData, setProfileData] = useState(null);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const role = getRole();
+        let data;
+        if (role === 'enabler') {
+          data = await profile.enablerGet();
+        } else {
+          data = await profile.pathfinderGet();
+        }
+        if (data) {
+          setProfileData(data);
+        }
+        // Also load profile picture using pictureGet API
+        try {
+          const picData = await profile.pictureGet();
+          if (picData && picData.profile_pic) {
+            setProfileData(prev => prev ? { ...prev, profile_pic: picData.profile_pic } : null);
+          }
+        } catch (picErr) {
+          // Picture not set yet, that's okay
+        }
+      } catch (err) {
+        console.error('Error loading profile:', err);
+      }
+    };
+    loadProfile();
+  }, []);
+
+  // Get profile picture URL from profile data
+  const profilePic = profileData?.base_details?.profile_pic || profileData?.profile_pic || null;
 
   const profileInfo = useMemo(() => {
     let name = user?.name || 'Pathfinder';
     let title = '';
-    try {
-      const saved = localStorage.getItem('userProfile');
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (p.displayName) name = p.displayName;
-        if (p.title) title = p.title;
+    
+    if (profileData) {
+      if (profileData.first_name || profileData.last_name) {
+        name = `${profileData.first_name || ''} ${profileData.last_name || ''}`.trim();
+      } else if (profileData.name) {
+        name = profileData.name;
       }
-    } catch (_) {}
+      if (profileData.title) title = profileData.title;
+      if (profileData.about) title = profileData.about.split('\n')[0];
+    }
+    
     return { name, title };
-  }, [user?.name]);
+  }, [user?.name, profileData]);
+
+  const role = getRole();
 
   const handleLogout = () => {
     setIsOpen(false);
@@ -38,7 +77,7 @@ const NavBar = () => {
             className="fa-solid fa-bars text-xl font-bold cursor-pointer text-gray-800"
             onClick={() => setIsOpen(true)}
           ></i>
-          <Link to="/">
+          <Link to={role === 'pathfinder' ? '/pathf' : '/'}>
             <i className="fa-regular fa-house text-xl font-bold text-gray-800 cursor-pointer hover:text-purple-600"></i>
           </Link>
         </div>
@@ -66,24 +105,47 @@ const NavBar = () => {
       >
         <div>
           <div className="px-3 py-5 text-center">
-            <div className="w-[50px] h-[50px] bg-gray-300 mx-auto rounded-full flex items-center justify-center text-[#6A00B1] font-bold text-lg">
-              {profileInfo.name ? profileInfo.name.charAt(0).toUpperCase() : 'P'}
-            </div>
+            {profilePic ? (
+              <img 
+                src={profilePic} 
+                alt={profileInfo.name}
+                className="w-[50px] h-[50px] mx-auto rounded-full object-cover border-2 border-purple-500"
+              />
+            ) : (
+              <div className="w-[50px] h-[50px] bg-gray-300 mx-auto rounded-full flex items-center justify-center text-[#6A00B1] font-bold text-lg">
+                {profileInfo.name ? profileInfo.name.charAt(0).toUpperCase() : 'P'}
+              </div>
+            )}
             <p className="font-sans text-xl text-black mt-3 font-bold truncate px-2">{profileInfo.name}</p>
             <p className="font-sans text-sm text-[#797979] truncate px-2">{profileInfo.title || 'Pathfinder'}</p>
           </div>
 
           <ul className="p-4 space-y-5 text-sm text-black font-medium font-sans">
-            <Link to="/">
+            <Link to={role === 'pathfinder' ? '/pathf' : '/'}>
               <li className="bg-white py-2 px-3 rounded-xl hover:bg-gray-300 flex items-center gap-3 m-2">
                 <i className="fas fa-house"></i> Home
               </li>
             </Link>
-            <Link to="/pathf">
-              <li className="bg-white py-2 px-3 rounded-xl hover:bg-gray-300 flex items-center gap-3 m-2">
-                <i className="fas fa-chart-line"></i> Dashboard
-              </li>
-            </Link>
+            {role === 'pathfinder' ? (
+              <Link to="/my-applications">
+                <li className="bg-white py-2 px-3 rounded-xl hover:bg-gray-300 flex items-center gap-3 m-2">
+                  <i className="fas fa-file-alt"></i> My Applications
+                </li>
+              </Link>
+            ) : (
+              <Link to="/pathf">
+                <li className="bg-white py-2 px-3 rounded-xl hover:bg-gray-300 flex items-center gap-3 m-2">
+                  <i className="fas fa-chart-line"></i> Dashboard
+                </li>
+              </Link>
+            )}
+            {role === 'pathfinder' && (
+              <Link to="/available-opportunities">
+                <li className="bg-white py-2 px-3 rounded-xl hover:bg-gray-300 flex items-center gap-3 m-2">
+                  <i className="fas fa-briefcase"></i> Available Opportunities
+                </li>
+              </Link>
+            )}
             <Link to="/bookmarks">
               <li className="bg-white py-2 px-3 rounded-xl hover:bg-gray-300 flex items-center gap-3 m-2">
                 <i className="fas fa-bookmark"></i> Bookmarks
@@ -97,13 +159,16 @@ const NavBar = () => {
           </ul>
 
           {user ? (
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="w-[80%] bg-purple-900 mt-10 mb-3 text-white text-sm font-extrabold py-3 rounded-xl mx-auto block"
-            >
-              Logout
-            </button>
+            <div className="px-4 pb-6">
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="bg-white py-2 px-3 rounded-xl hover:bg-gray-300 flex items-center gap-3 w-full m-2 text-sm font-medium text-black"
+              >
+                <i className="fas fa-sign-out-alt"></i>
+                <span>Logout</span>
+              </button>
+            </div>
           ) : null}
         </div>
       </div>

@@ -1,15 +1,22 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
-import * as api from "../../services/api";
+import { bookmarks } from "../../services/api";
+
+import { getOrgName, navigateToVolunteerDetails } from "../../utils/opportunityUtils";
 
 function mapSavedToJob(s) {
   const opp = s.opportunity || {};
   return {
     id: opp.id ?? s.opportunity_id ?? s.id,
     bookmarkId: s.id,
-    title: opp.title || 'Opportunity',
-    company: opp.link || opp.description || 'Remote',
+    title: opp.title || "Opportunity",
+    company: getOrgName(opp),
+    type: opp.opportunity_type || "Volunteering",
+    location: opp.location || "",
+    created_by: opp.created_by,
+    link: opp.link,
+    _raw: opp,
   };
 }
 
@@ -17,23 +24,19 @@ const Bookmarks = () => {
   const navigate = useNavigate();
   const [bookmarkedJobs, setBookmarkedJobs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [useApi, setUseApi] = useState(true);
+  const [error, setError] = useState(null);
 
   const loadBookmarks = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const data = await api.bookmark.opportunitiesSavedList();
+      const data = await bookmarks.opportunitiesSavedList();
       const arr = Array.isArray(data) ? data.map(mapSavedToJob) : [];
       setBookmarkedJobs(arr);
-      setUseApi(true);
-    } catch (_) {
-      try {
-        const fallback = JSON.parse(localStorage.getItem('bookmarkedJobsData') || '[]');
-        setBookmarkedJobs(Array.isArray(fallback) ? fallback : []);
-      } catch (e) {
-        setBookmarkedJobs([]);
-      }
-      setUseApi(false);
+    } catch (err) {
+      console.error("Error loading bookmarks:", err);
+      setError(err.message || "Failed to load bookmarks");
+      setBookmarkedJobs([]);
     } finally {
       setLoading(false);
     }
@@ -47,31 +50,27 @@ const Bookmarks = () => {
     loadBookmarks();
     const handleFocus = () => loadBookmarks();
     window.addEventListener('focus', handleFocus);
-    window.addEventListener('storage', loadBookmarks);
     return () => {
       window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('storage', loadBookmarks);
     };
   }, [loadBookmarks]);
 
   const handleRemoveBookmark = async (job) => {
     const bookmarkId = job.bookmarkId;
-    if (useApi && bookmarkId != null) {
+    if (bookmarkId != null) {
       try {
-        await api.bookmark.delete(bookmarkId);
+        await bookmarks.delete(bookmarkId);
         setBookmarkedJobs((prev) => prev.filter((j) => j.bookmarkId !== bookmarkId));
-        return;
-      } catch (_) {}
+      } catch (err) {
+        console.error("Error removing bookmark:", err);
+      }
     }
-    const updatedJobs = bookmarkedJobs.filter((j) => j.id !== job.id && j.bookmarkId !== bookmarkId);
-    setBookmarkedJobs(updatedJobs);
-    localStorage.setItem('bookmarkedJobsData', JSON.stringify(updatedJobs));
-    const ids = JSON.parse(localStorage.getItem('bookmarkedJobs') || '[]');
-    localStorage.setItem('bookmarkedJobs', JSON.stringify(ids.filter((id) => id !== String(job.id))));
   };
 
-  const handleViewDetails = (job) => {
-    navigate('/volunteer-details', { state: { job } });
+  const handleViewDetails = async (job) => {
+    await navigateToVolunteerDetails(navigate, job.id, {
+      fallbackJob: job,
+    });
   };
 
   return (
@@ -90,6 +89,13 @@ const Bookmarks = () => {
               View and manage your saved volunteering opportunities
             </p>
           </div>
+
+          {/* Error Message */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+              {error}
+            </div>
+          )}
 
           {/* Bookmarked Jobs List */}
           {loading ? (
@@ -113,7 +119,11 @@ const Bookmarks = () => {
               {bookmarkedJobs.map((job) => (
                 <div
                   key={job.bookmarkId ?? job.id}
-                  className="bg-white border border-gray-200 rounded-lg p-3 flex items-center gap-3 hover:shadow-sm transition-all"
+                  className="bg-white border border-gray-200 rounded-lg p-3 flex items-center gap-3 hover:shadow-sm transition-all cursor-pointer"
+                  onClick={(e) => {
+                    if (e.target.closest('button')) return;
+                    handleViewDetails(job);
+                  }}
                 >
                   {/* Left - Circular Placeholder */}
                   <div className="w-12 h-12 bg-gray-200 rounded-full flex-shrink-0"></div>

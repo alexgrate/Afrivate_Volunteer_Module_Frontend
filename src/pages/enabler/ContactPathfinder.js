@@ -3,8 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
 import Toast from "../../components/common/Toast";
 import { getPathfinderById } from "../../utils/pathfinderData";
-
-const CONTACT_MESSAGES_KEY = "enablerContactMessages";
+import { notifications } from "../../services/api";
 
 const ContactPathfinder = () => {
   const navigate = useNavigate();
@@ -13,29 +12,37 @@ const ContactPathfinder = () => {
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [toast, setToast] = useState({ isOpen: false, message: "", type: "success" });
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     setPathfinder(getPathfinderById(id));
   }, [id]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!pathfinder || !subject.trim() || !message.trim()) {
       setToast({ isOpen: true, message: "Please fill in subject and message.", type: "error" });
       return;
     }
-    const messages = JSON.parse(localStorage.getItem(CONTACT_MESSAGES_KEY) || "[]");
-    messages.push({
-      pathfinderId: pathfinder.id,
-      pathfinderName: pathfinder.name,
-      subject: subject.trim(),
-      message: message.trim(),
-      createdAt: new Date().toISOString(),
-    });
-    localStorage.setItem(CONTACT_MESSAGES_KEY, JSON.stringify(messages));
-    setToast({ isOpen: true, message: "Message sent successfully. The pathfinder will be notified.", type: "success" });
-    setSubject("");
-    setMessage("");
+    
+    setSending(true);
+    try {
+      await notifications.create({
+        title: subject.trim(),
+        message: message.trim(),
+        priority: "info",
+        type: "personal",
+        link: `/pathfinder/profile/${pathfinder.id}`
+      });
+      setToast({ isOpen: true, message: "Message sent successfully. The pathfinder will be notified.", type: "success" });
+      setSubject("");
+      setMessage("");
+    } catch (err) {
+      console.error('Error sending notification:', err);
+      setToast({ isOpen: true, message: "Failed to send message. Please try again.", type: "error" });
+    } finally {
+      setSending(false);
+    }
   };
 
   if (!pathfinder) {

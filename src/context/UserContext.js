@@ -47,45 +47,54 @@ function normalizePathfinderProfile(data) {
 export const UserProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const fetchUser = useCallback(async () => {
+    setError(null);
+    
+    // Check for token first
     const access = api.getAccessToken();
     if (!access) {
       setUser(null);
       setLoading(false);
       return;
     }
+    
+    const role = api.getRole();
+    
+    // Only fetch profile if role is explicitly set
+    if (!role) {
+      setLoading(false);
+      return;
+    }
+    
     try {
-      const role = api.getRole();
       if (role === 'enabler') {
         const data = await api.profile.enablerGet();
-        setUser(normalizeEnablerProfile(data));
+        if (data && data.id != null) {
+          setUser(normalizeEnablerProfile(data));
+        } else {
+          setUser(null);
+        }
+        setLoading(false);
         return;
       }
+      
       if (role === 'pathfinder') {
         const data = await api.profile.pathfinderGet();
-        setUser(normalizePathfinderProfile(data));
+        if (data && data.id != null) {
+          setUser(normalizePathfinderProfile(data));
+        } else {
+          setUser(null);
+        }
+        setLoading(false);
         return;
       }
-      try {
-        const enabler = await api.profile.enablerGet();
-        if (enabler && enabler.id != null) {
-          api.setRole('enabler');
-          setUser(normalizeEnablerProfile(enabler));
-          return;
-        }
-      } catch (_) {}
-      try {
-        const pathfinder = await api.profile.pathfinderGet();
-        if (pathfinder && pathfinder.id != null) {
-          api.setRole('pathfinder');
-          setUser(normalizePathfinderProfile(pathfinder));
-          return;
-        }
-      } catch (_) {}
+      
+      // Unknown role - don't try to fetch any profile
       setUser(null);
-    } catch (_) {
-      api.clearTokens();
+    } catch (err) {
+      console.error("Error fetching user profile:", err);
       setUser(null);
     } finally {
       setLoading(false);
@@ -100,16 +109,21 @@ export const UserProvider = ({ children }) => {
     setUser((prev) => (prev ? { ...prev, ...newData } : null));
   };
 
+  const clearError = useCallback(() => setError(null), []);
+
   const logout = useCallback(async () => {
+    setError(null);
     try {
       await api.auth.logout();
-    } catch (_) {}
+    } catch (err) {
+      // Still clear local state on logout
+    }
     api.clearTokens();
     setUser(null);
   }, []);
 
   return (
-    <UserContext.Provider value={{ user, loading, updateUser, logout, refetchUser: fetchUser }}>
+    <UserContext.Provider value={{ user, loading, error, updateUser, logout, refetchUser: fetchUser, clearError }}>
       {children}
     </UserContext.Provider>
   );

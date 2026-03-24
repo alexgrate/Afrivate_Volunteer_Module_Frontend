@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
-
-const PROFILE_STORAGE_KEY = 'appProfile';
+import { profile, getRole } from '../services/api';
 
 const defaultFormData = {
   firstName: 'Amina',
@@ -34,28 +33,38 @@ const Profile = () => {
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(PROFILE_STORAGE_KEY);
-      if (user?.raw) {
-        const r = user.raw;
-        const base = r.base_details || {};
-        setFormData((prev) => ({
-          ...prev,
-          firstName: r.first_name || prev.firstName,
-          lastName: r.last_name || prev.lastName,
-          email: base.contact_email || prev.email,
-          phone: base.phone_number || prev.phone,
-          address: base.address || prev.address,
-          city: base.city || prev.city,
-          state: base.state || prev.state,
-          country: base.country || prev.country,
-        }));
-      } else if (saved) {
-        const parsed = JSON.parse(saved);
-        setFormData((prev) => ({ ...prev, ...parsed }));
+    const loadProfile = async () => {
+      try {
+        const role = getRole();
+        let profileData;
+        
+        if (role === 'enabler') {
+          profileData = await profile.enablerGet();
+        } else {
+          profileData = await profile.pathfinderGet();
+        }
+        
+        if (profileData) {
+          const base = profileData.base_details || {};
+          setFormData((prev) => ({
+            ...prev,
+            firstName: profileData.first_name || profileData.name || prev.firstName,
+            lastName: profileData.last_name || prev.lastName,
+            email: base.contact_email || prev.email,
+            phone: base.phone_number || prev.phone,
+            address: base.address || prev.address,
+            city: base.city || prev.city,
+            state: base.state || prev.state,
+            country: base.country || prev.country,
+          }));
+        }
+      } catch (err) {
+        console.error('Error loading profile:', err);
       }
-    } catch (_) {}
-  }, [user]);
+    };
+    
+    loadProfile();
+  }, []);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -109,12 +118,31 @@ const Profile = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (validateForm()) {
-      const toSave = { ...formData, currentPassword: '', newPassword: '', confirmPassword: '' };
       try {
-        localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(toSave));
-      } catch (_) {}
+        const role = getRole();
+        const profileData = {
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          base_details: {
+            contact_email: formData.email,
+            phone_number: formData.phone,
+            address: formData.address,
+            city: formData.city,
+            state: formData.state,
+            country: formData.country,
+          }
+        };
+        
+        if (role === 'enabler') {
+          await profile.enablerPatch(profileData);
+        } else {
+          await profile.pathfinderPatch(profileData);
+        }
+      } catch (err) {
+        console.error('Error saving profile:', err);
+      }
     }
   };
 

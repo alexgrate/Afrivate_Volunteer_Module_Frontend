@@ -34,9 +34,13 @@ import DashFreelance from './pages/Dash-freelance';
 import Opportunity from './pages/pathfinder/Opportunity';
 import Pathf from './pages/pathfinder/PathfinderDashboard';
 import VolunteerDetails from './pages/pathfinder/VolunteerDetails';
+import MyApplications from './pages/pathfinder/MyApplications';
+import OrganizationProfile from './pages/pathfinder/OrganizationProfile';
 import ApplyApplication from './pages/pathfinder/ApplyApplication';
 import Bookmarks from './pages/pathfinder/Bookmarks';
 import EditNewProfile from './pages/pathfinder/EditNewProfile';
+import AvailableOpportunities from './pages/pathfinder/AvailableOpportunities';
+import EnablerProfileView from './pages/pathfinder/EnablerProfileView';
 import Road from './pages/Roadmap';
 import Dashboard from './pages/Dashboard';
 import Profile from './pages/Profile';
@@ -74,17 +78,22 @@ function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/landingpathfinder" element={<LandingPathfinder />} />
           <Route path="/landingenabler" element={<Landingenabler />} />
-          <Route path="/dashf" element={<RequireAuth><Pathf /></RequireAuth>} />
-          <Route path="/enabler/dashboard" element={<RequireAuth><EnablerDashboard /></RequireAuth>} />
+          <Route path="/dashf" element={<RequireAuth role="pathfinder"><Pathf /></RequireAuth>} />
+          <Route path="/enabler/dashboard" element={<RequireAuth role="enabler"><EnablerDashboard /></RequireAuth>} />
           <Route path="/emppro" element={<RequireAuth><Emppro /></RequireAuth>} />
           <Route path="/dash-employer" element={<RequireAuth><DashEmployer /></RequireAuth>} />
           <Route path="/dash-freelance" element={<RequireAuth><DashFreelance /></RequireAuth>} />
           <Route path="/opportunity" element={<Opportunity />} />
           <Route path="/volunteer-details" element={<VolunteerDetails />} />
-          <Route path="/apply/:opportunityId" element={<RequireAuth><ApplyApplication /></RequireAuth>} />
-          <Route path="/bookmarks" element={<RequireAuth><Bookmarks /></RequireAuth>} />
-          <Route path="/edit-new-profile" element={<RequireAuth><EditNewProfile /></RequireAuth>} />
-          <Route path="/pathf" element={<RequireAuth><Pathf /></RequireAuth>} />
+          <Route path="/my-applications" element={<RequireAuth role="pathfinder"><MyApplications /></RequireAuth>} />
+          <Route path="/organization/:id" element={<OrganizationProfile />} />
+          <Route path="/apply/:opportunityId" element={<RequireAuth role="pathfinder"><ApplyApplication /></RequireAuth>} />
+          <Route path="/bookmarks" element={<RequireAuth role="pathfinder"><Bookmarks /></RequireAuth>} />
+          <Route path="/available-opportunities" element={<RequireAuth role="pathfinder"><AvailableOpportunities /></RequireAuth>} />
+          <Route path="/enabler-profile/:id" element={<RequireAuth role="pathfinder"><EnablerProfileView /></RequireAuth>} />
+          <Route path="/edit-new-profile" element={<RequireAuth role="pathfinder"><EditNewProfile /></RequireAuth>} />
+          <Route path="/pathfinder/profile-setup" element={<RequireAuth role="pathfinder"><EditNewProfile /></RequireAuth>} />
+          <Route path="/pathf" element={<RequireAuth role="pathfinder"><Pathf /></RequireAuth>} />
           <Route path="/road" element={<Road />} />
           <Route path="/about" element={<AboutUs />} />
           <Route path="/contact" element={<ContactUs />} />
@@ -95,19 +104,19 @@ function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/verify-otp" element={<VerifyOTP />} />
           <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/create-opportunity" element={<RequireAuth><CreateOpportunity /></RequireAuth>} />
-          <Route path="/enabler/recommendations" element={<RequireAuth><Recommendations /></RequireAuth>} />
-          <Route path="/enabler/profile" element={<RequireAuth><EnablerProfile /></RequireAuth>} />
-          <Route path="/enabler/edit-profile" element={<RequireAuth><EditProfile /></RequireAuth>} />
-          <Route path="/enabler/opportunity/:id" element={<RequireAuth><OpportunityDetails /></RequireAuth>} />
-          <Route path="/enabler/edit-opportunity/:id" element={<RequireAuth><EditOpportunity /></RequireAuth>} />
-          <Route path="/enabler/opportunities-posted" element={<RequireAuth><OpportunitiesPosted /></RequireAuth>} />
-          <Route path="/enabler/settings" element={<RequireAuth><Settings /></RequireAuth>} />
-          <Route path="/enabler/pathfinder/:id" element={<RequireAuth><PathfinderProfile /></RequireAuth>} />
-          <Route path="/enabler/contact/:id" element={<RequireAuth><ContactPathfinder /></RequireAuth>} />
-          <Route path="/enabler/bookmarked-pathfinders" element={<RequireAuth><EnablerPathfinderBookmarks /></RequireAuth>} />
-          <Route path="/enabler/applicants/:id" element={<RequireAuth><Applicants /></RequireAuth>} />
-          <Route path="/enabler/profile-setup" element={<RequireAuth><EnablerProfileSetup /></RequireAuth>} />
+          <Route path="/create-opportunity" element={<RequireAuth role="enabler"><CreateOpportunity /></RequireAuth>} />
+          <Route path="/enabler/recommendations" element={<RequireAuth role="enabler"><Recommendations /></RequireAuth>} />
+          <Route path="/enabler/profile" element={<RequireAuth role="enabler"><EnablerProfile /></RequireAuth>} />
+          <Route path="/enabler/edit-profile" element={<RequireAuth role="enabler"><EditProfile /></RequireAuth>} />
+          <Route path="/enabler/opportunity/:id" element={<RequireAuth role="enabler"><OpportunityDetails /></RequireAuth>} />
+          <Route path="/enabler/edit-opportunity/:id" element={<RequireAuth role="enabler"><EditOpportunity /></RequireAuth>} />
+          <Route path="/enabler/opportunities-posted" element={<RequireAuth role="enabler"><OpportunitiesPosted /></RequireAuth>} />
+          <Route path="/enabler/settings" element={<RequireAuth role="enabler"><Settings /></RequireAuth>} />
+          <Route path="/enabler/pathfinder/:id" element={<RequireAuth role="enabler"><PathfinderProfile /></RequireAuth>} />
+          <Route path="/enabler/contact/:id" element={<RequireAuth role="enabler"><ContactPathfinder /></RequireAuth>} />
+          <Route path="/enabler/bookmarked-pathfinders" element={<RequireAuth role="enabler"><EnablerPathfinderBookmarks /></RequireAuth>} />
+          <Route path="/enabler/applicants/:id" element={<RequireAuth role="enabler"><Applicants /></RequireAuth>} />
+          <Route path="/enabler/profile-setup" element={<RequireAuth role="enabler"><EnablerProfileSetup /></RequireAuth>} />
 
           {/* Protected routes */}
           <Route

@@ -1,56 +1,70 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
-import * as api from "../../services/api";
+import Toast from "../../components/common/Toast";
+import { profile, getApiErrorMessage } from "../../services/api";
 
 const EnablerProfileSetup = () => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [existingProfile, setExistingProfile] = useState(null);
+  const [toast, setToast] = useState({ isOpen: false, message: "", type: "error" });
 
   useEffect(() => {
     document.title = "Enabler Profile Setup - AfriVate";
   }, []);
+
+  // Form data aligned with Enabler Profile API documentation
   const [formData, setFormData] = useState({
-    // Step 1: Setup Profile
-    profilePicture: null,
-    bio: "",
-    // Step 2: Personal Information
+    // Step 1: Profile Info
     name: "",
-    country: "",
-    email: "",
-    state: "",
-    phoneNumber: "",
+    bio: "",
+    // Step 2: Contact Information
+    contact_email: "",
+    phone_number: "",
     address: "",
+    state: "",
+    country: "",
     // Step 3: Business Info
     website: "",
     employees: "",
     role: "",
-    document: null
+    social_links: [],
+    document: null,
   });
 
-  // Load existing enabler profile from localStorage on mount
+  // Load existing enabler profile from API on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('enablerProfile');
-      if (saved) {
-        const profile = JSON.parse(saved);
-        setFormData(prev => ({
-          ...prev,
-          bio: profile.bio ?? prev.bio,
-          name: profile.name ?? prev.name,
-          country: profile.country ?? prev.country,
-          email: profile.email ?? prev.email,
-          state: profile.state ?? prev.state,
-          phoneNumber: profile.phoneNumber ?? prev.phoneNumber,
-          address: profile.address ?? prev.address,
-          website: profile.website ?? prev.website,
-          employees: profile.employees ?? prev.employees,
-          role: profile.role ?? prev.role,
-        }));
+    const loadProfile = async () => {
+      try {
+        const data = await profile.enablerGet();
+        if (data) {
+          setExistingProfile(data);
+          const base = data.base_details || {};
+          setFormData(prev => ({
+            ...prev,
+            name: data.name || prev.name,
+            bio: base.bio || prev.bio,
+            contact_email: base.contact_email || prev.contact_email,
+            phone_number: base.phone_number || prev.phone_number,
+            address: base.address || prev.address,
+            state: base.state || prev.state,
+            country: base.country || prev.country,
+            website: base.website || prev.website,
+            employees: data.employees != null && data.employees !== "" ? String(data.employees) : prev.employees,
+            role: data.role || prev.role,
+            social_links: data.social_links || prev.social_links,
+          }));
+        }
+      } catch (err) {
+        console.log("No existing profile found, proceeding with setup");
+      } finally {
+        setInitialLoading(false);
       }
-    } catch (e) {
-      console.error('Error loading enabler profile from localStorage:', e);
-    }
+    };
+    loadProfile();
   }, []);
 
   const handleInputChange = (e) => {
@@ -76,53 +90,99 @@ const EnablerProfileSetup = () => {
       setCurrentStep(currentStep + 1);
       return;
     }
-    const { profilePicture, document: doc, ...rest } = formData;
-    const profileData = {
-      ...rest,
-      profileComplete: true,
-      createdAt: new Date().toISOString()
-    };
-    localStorage.setItem('enablerProfile', JSON.stringify(profileData));
-    localStorage.setItem('hasCompletedEnablerProfile', 'true');
 
+    setLoading(true);
+    setToast(prev => ({ ...prev, isOpen: false }));
     try {
-      const base_details = {
-        bio: formData.bio || '',
-        country: formData.country || '',
-        contact_email: formData.email || '',
-        phone_number: formData.phoneNumber || '',
-        website: formData.website || '',
-        address: formData.address || '',
-        city: '',
-        state: formData.state || '',
+      // Coerce employees to integer per API (integer or null)
+      const employeesVal = formData.employees === "" || formData.employees == null
+        ? null
+        : parseInt(formData.employees, 10);
+      const employees = (employeesVal !== employeesVal || employeesVal === "") ? null : employeesVal;
+
+      const baseDetails = {
+        contact_email: formData.contact_email || "",
+        address: formData.address || "",
+        state: formData.state || "",
+        country: formData.country || "",
+        phone_number: formData.phone_number || "",
+        website: formData.website || "",
+        bio: formData.bio || "",
       };
-      const body = { name: formData.name || 'Enabler', base_details, social_links: [] };
-      await api.profile.enablerUpdate(body);
-    } catch (_) {
-      try {
-        const base_details = {
-          bio: formData.bio || '',
-          country: formData.country || '',
-          contact_email: formData.email || '',
-          phone_number: formData.phoneNumber || '',
-          website: formData.website || '',
-          address: formData.address || '',
-          city: '',
-          state: formData.state || '',
-        };
-        await api.profile.enablerCreate({ name: formData.name || 'Enabler', base_details, social_links: [] });
-      } catch (__) {}
+      if (existingProfile?.base_details?.id != null) {
+        baseDetails.id = existingProfile.base_details.id;
+      }
+
+      const profileData = {
+        name: (formData.name || "Enabler").trim(),
+        employees,
+        role: formData.role || null,
+        base_details: baseDetails,
+        social_links: Array.isArray(formData.social_links) ? formData.social_links : [],
+      };
+
+      let saved = false;
+      if (existingProfile?.id != null) {
+        try {
+          await profile.enablerUpdate(profileData);
+          saved = true;
+        } catch (updateErr) {
+          try {
+            await profile.enablerPatch(profileData);
+            saved = true;
+          } catch (_) {
+            throw updateErr;
+          }
+        }
+      } else {
+        try {
+          await profile.enablerPatch(profileData);
+          saved = true;
+        } catch (patchErr) {
+          try {
+            await profile.enablerUpdate(profileData);
+            saved = true;
+          } catch (_) {
+            throw patchErr;
+          }
+        }
+      }
+
+      if (!saved) throw new Error("Failed to save profile");
+
+      // Upload company document via /api/profile/credentials/ (multipart: document_name, document)
+      if (formData.document) {
+        try {
+          const fd = new FormData();
+          fd.append("document_name", "Company Document");
+          fd.append("document", formData.document);
+          await profile.credentialsCreate(fd);
+        } catch (docErr) {
+          console.error("Error uploading document:", docErr);
+        }
+      }
+
+      navigate('/enabler/dashboard');
+    } catch (err) {
+      console.error("Error saving profile:", err);
+      setToast({
+        isOpen: true,
+        message: getApiErrorMessage(err),
+        type: "error",
+      });
+    } finally {
+      setLoading(false);
     }
-    navigate('/enabler/dashboard');
   };
 
   const canProceed = () => {
     if (currentStep === 1) {
-      return formData.bio.trim() !== "";
+      return formData.name.trim() !== "" && formData.bio.trim() !== "";
     } else if (currentStep === 2) {
-      return formData.name.trim() !== "" && 
-             formData.email.trim() !== "" && 
-             formData.country.trim() !== "";
+      return formData.contact_email.trim() !== "" && 
+             formData.country.trim() !== "" &&
+             formData.state.trim() !== "" &&
+             formData.address.trim() !== "";
     } else if (currentStep === 3) {
       return formData.website.trim() !== "" && 
              formData.employees.trim() !== "" && 
@@ -132,13 +192,31 @@ const EnablerProfileSetup = () => {
   };
 
   const handleStepClick = (stepNumber) => {
-    // Allow navigation to any step
     setCurrentStep(stepNumber);
   };
+
+  if (initialLoading) {
+    return (
+      <div className="min-h-screen bg-white font-sans">
+        <EnablerNavbar />
+        <div className="pt-20 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent mx-auto"></div>
+          <p className="text-gray-600 mt-4">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white font-sans">
       <EnablerNavbar />
+      {toast.isOpen && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(prev => ({ ...prev, isOpen: false }))}
+        />
+      )}
       
       {/* Main Content */}
       <div className="pt-20 px-4 md:px-6 pb-8">
@@ -207,7 +285,7 @@ const EnablerProfileSetup = () => {
               </div>
             </div>
 
-            {/* Step 1: Setup Profile */}
+            {/* Step 1: Profile Setup */}
             {currentStep === 1 && (
               <div className="space-y-6">
                 <div className="text-center">
@@ -216,59 +294,51 @@ const EnablerProfileSetup = () => {
                   </h1>
                 </div>
 
-                {/* Profile Picture */}
-                <div className="flex flex-col items-center">
-                  <label className="cursor-pointer">
-                    <div className="w-16 h-16 md:w-20 md:h-20 bg-gray-200 rounded-full flex items-center justify-center mb-2">
-                      {formData.profilePicture ? (
-                        <img 
-                          src={URL.createObjectURL(formData.profilePicture)} 
-                          alt="Profile" 
-                          className="w-full h-full rounded-full object-cover"
-                        />
-                      ) : (
-                        <i className="fa fa-camera text-xl md:text-2xl text-gray-400"></i>
-                      )}
-                    </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => handleFileChange(e, 'profilePicture')}
-                      className="hidden"
-                    />
-                  </label>
-                  <p className="text-gray-400 text-xs">Picture</p>
+                {/* Organization Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Organization Name *</label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={formData.name}
+                    onChange={handleInputChange}
+                    placeholder="Your organization name"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                    required
+                  />
                 </div>
 
                 {/* Bio */}
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bio *</label>
                   <textarea
                     name="bio"
                     value={formData.bio}
                     onChange={handleInputChange}
-                    placeholder="Bio"
+                    placeholder="Describe your organization"
                     rows="3"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 resize-none text-xs"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm resize-none"
+                    required
                   />
                 </div>
 
                 <div className="flex justify-end mt-4">
                   <button
                     onClick={handleProceed}
-                    disabled={!canProceed()}
+                    disabled={!canProceed() || loading}
                     className={`px-4 md:px-6 py-1.5 md:py-2 rounded-lg font-semibold text-white transition-colors text-xs md:text-sm ${
-                      canProceed()
+                      canProceed() && !loading
                         ? 'bg-[#6A00B1] hover:bg-[#5A0091]'
                         : 'bg-gray-300 cursor-not-allowed'
                     }`}
                   >
-                    Proceed
+                    {loading ? 'Saving...' : 'Proceed'}
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Step 2: Personal Information */}
+            {/* Step 2: Contact Information */}
             {currentStep === 2 && (
               <div className="space-y-4">
                 <div className="text-center mb-4">
@@ -276,30 +346,47 @@ const EnablerProfileSetup = () => {
                     Enabler Profile Setup
                   </h1>
                   <p className="text-gray-500 text-xs">
-                    Step 2: Personal Information - These details will help customize your account
+                    Step 2: Contact Information - These details will help pathfinders reach you
                   </p>
                 </div>
 
-                {/* Name */}
+                {/* Contact Email */}
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email *</label>
                   <input
-                    type="text"
-                    name="name"
-                    value={formData.name}
+                    type="email"
+                    name="contact_email"
+                    value={formData.contact_email}
                     onChange={handleInputChange}
-                    placeholder="Name"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-xs"
+                    placeholder="contact@organization.com"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                    required
                   />
                 </div>
 
-                {/* Country and Email */}
+                {/* Phone Number */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                  <input
+                    type="tel"
+                    name="phone_number"
+                    value={formData.phone_number}
+                    onChange={handleInputChange}
+                    placeholder="+234..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                  />
+                </div>
+
+                {/* Country and State */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="relative">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Country *</label>
                     <select
                       name="country"
                       value={formData.country}
                       onChange={handleInputChange}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 appearance-none bg-white pr-8 text-xs"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm bg-white"
+                      required
                     >
                       <option value="">Select Country</option>
                       <option value="Nigeria">Nigeria</option>
@@ -307,68 +394,48 @@ const EnablerProfileSetup = () => {
                       <option value="Ghana">Ghana</option>
                       <option value="South Africa">South Africa</option>
                       <option value="Tanzania">Tanzania</option>
+                      <option value="Other">Other</option>
                     </select>
-                    <i className="fa fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none text-xs"></i>
                   </div>
                   <div>
-                    <input
-                      type="email"
-                      name="email"
-                      value={formData.email}
-                      onChange={handleInputChange}
-                      placeholder="Email"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-xs"
-                    />
-                  </div>
-                </div>
-
-                {/* State and Phone Number */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">State *</label>
                     <input
                       type="text"
                       name="state"
                       value={formData.state}
                       onChange={handleInputChange}
                       placeholder="State"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-xs"
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="tel"
-                      name="phoneNumber"
-                      value={formData.phoneNumber}
-                      onChange={handleInputChange}
-                      placeholder="Phone Number"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-xs"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                      required
                     />
                   </div>
                 </div>
 
                 {/* Address */}
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Address *</label>
                   <input
                     type="text"
                     name="address"
                     value={formData.address}
                     onChange={handleInputChange}
-                    placeholder="Address"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-xs"
+                    placeholder="Full address"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                    required
                   />
                 </div>
 
                 <div className="flex justify-end mt-4">
                   <button
                     onClick={handleProceed}
-                    disabled={!canProceed()}
+                    disabled={!canProceed() || loading}
                     className={`px-4 md:px-6 py-1.5 md:py-2 rounded-lg font-semibold text-white transition-colors text-xs md:text-sm ${
-                      canProceed()
+                      canProceed() && !loading
                         ? 'bg-[#6A00B1] hover:bg-[#5A0091]'
                         : 'bg-gray-300 cursor-not-allowed'
                     }`}
                   >
-                    Proceed
+                    {loading ? 'Saving...' : 'Proceed'}
                   </button>
                 </div>
               </div>
@@ -388,44 +455,50 @@ const EnablerProfileSetup = () => {
 
                 {/* Website */}
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Website *</label>
                   <input
-                    type="text"
+                    type="url"
                     name="website"
                     value={formData.website}
                     onChange={handleInputChange}
-                    placeholder="Website"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-xs"
+                    placeholder="https://organization.com"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                    required
                   />
                 </div>
 
                 {/* Employees */}
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Number of Employees *</label>
                   <input
                     type="text"
                     name="employees"
                     value={formData.employees}
                     onChange={handleInputChange}
-                    placeholder="How Many employees are in your company?"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-xs"
+                    placeholder="e.g. 50"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                    required
                   />
                 </div>
 
                 {/* Role */}
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Your Role *</label>
                   <input
                     type="text"
                     name="role"
                     value={formData.role}
                     onChange={handleInputChange}
-                    placeholder="What's your role?"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-xs"
+                    placeholder="e.g. CEO, Programme Manager"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#6A00B1] text-gray-700 text-sm"
+                    required
                   />
                 </div>
 
                 {/* Document Upload */}
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-2">
-                    Upload your document
+                    Upload your document (ID/Business Document)
                   </label>
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 md:p-6 text-center">
                     <input
@@ -458,14 +531,14 @@ const EnablerProfileSetup = () => {
                 <div className="flex justify-end mt-4">
                   <button
                     onClick={handleProceed}
-                    disabled={!canProceed()}
+                    disabled={!canProceed() || loading}
                     className={`px-4 md:px-6 py-1.5 md:py-2 rounded-lg font-semibold text-white transition-colors text-xs md:text-sm ${
-                      canProceed()
+                      canProceed() && !loading
                         ? 'bg-[#6A00B1] hover:bg-[#5A0091]'
                         : 'bg-gray-300 cursor-not-allowed'
                     }`}
                   >
-                    Proceed
+                    {loading ? 'Saving...' : 'Complete Setup'}
                   </button>
                 </div>
               </div>

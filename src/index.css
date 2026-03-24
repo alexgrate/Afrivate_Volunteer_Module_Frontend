@@ -23,6 +23,41 @@
       justify-content: center;
     }
   }
+
+    /* Purple outline for white / near-white interactive elements (hover, focus, active)
+       Uses attribute selectors to match Tailwind's bg-white and bg-white/* utilities.
+       This gives a consistent purple outline on hover/click for items that use
+       white backgrounds across the site (buttons, list items, links). */
+    @layer components {
+      [class*="bg-white"]:hover,
+      [class*="bg-white"]:focus,
+      [class*="bg-white"]:active,
+      [class*="bg-white/"]:hover,
+      [class*="bg-white/"]:focus,
+      [class*="bg-white/"]:active,
+      button[class*="bg-white"]:hover,
+      button[class*="bg-white"]:focus,
+      button[class*="bg-white"]:active,
+      a[class*="bg-white"]:hover,
+      a[class*="bg-white"]:focus,
+      a[class*="bg-white"]:active,
+      li[class*="bg-white"]:hover,
+      li[class*="bg-white"]:focus,
+      li[class*="bg-white"]:active {
+        outline: 2px solid #6A00B1; /* hero/signup purple */
+        outline-offset: 2px;
+        box-shadow: 0 0 0 4px rgba(106,0,177,0.12);
+      }
+
+      /* Ensure keyboard focus is visible for accessibility */
+      [class*="bg-white"]:focus-visible,
+      button[class*="bg-white"]:focus-visible,
+      a[class*="bg-white"]:focus-visible,
+      li[class*="bg-white"]:focus-visible {
+        outline: 3px solid #6A00B1;
+        outline-offset: 3px;
+      }
+    }
 }
 
 @layer components {

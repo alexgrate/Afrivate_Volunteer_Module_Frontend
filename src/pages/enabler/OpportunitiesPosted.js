@@ -1,23 +1,24 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
 import Modal from "../../components/common/Modal";
-import * as api from "../../services/api";
+import { opportunities, profile } from "../../services/api";
+import { getOrgName } from "../../utils/opportunityUtils";
 
 function mapApiOpportunity(item) {
   return {
     id: String(item.id),
     title: item.title || '',
-    company: "Tech Innovators",
-    type: "Volunteering",
+    company: getOrgName(item),
+    type: item.opportunity_type || "Volunteering",
     description: item.description || '',
     responsibilities: [],
     qualifications: [],
     aboutCompany: '',
     applicationInstructions: '',
-    jobType: "Volunteer",
-    location: "Remote",
-    workModel: "Remote",
+    jobType: item.opportunity_type || "Volunteer",
+    location: item.location || "",
+    workModel: item.work_model || "",
     timeCommitment: "",
     link: item.link,
     posted_at: item.posted_at,
@@ -27,10 +28,11 @@ function mapApiOpportunity(item) {
 
 const OpportunitiesPosted = () => {
   const navigate = useNavigate();
-  const [opportunities, setOpportunities] = useState([]);
+  const location = useLocation();
+  const [opportunitiesList, setOpportunitiesList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null });
-  const [clearAllModal, setClearAllModal] = useState({ isOpen: false });
 
   useEffect(() => {
     document.title = "Opportunities Posted - AfriVate";
@@ -38,43 +40,74 @@ const OpportunitiesPosted = () => {
 
   const loadOpportunities = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const data = await api.bookmark.opportunitiesList();
-      const arr = Array.isArray(data) ? data.map(mapApiOpportunity) : [];
-      if (arr.length > 0) {
-        setOpportunities(arr);
-        setLoading(false);
-        return;
+      const data = await opportunities.mine();
+      let rawList = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.results)
+        ? data.results
+        : Array.isArray(data?.data)
+        ? data.data
+        : [];
+
+      // Fallback: if mine() returns empty, load all opportunities and filter by enabler name
+      if (!rawList.length) {
+        try {
+          const enabler = await profile.enablerGet();
+          const enablerName = enabler?.name || enabler?.base_details?.organization_name || null;
+          const all = await opportunities.list();
+          const allRaw = Array.isArray(all)
+            ? all
+            : Array.isArray(all?.results)
+            ? all.results
+            : Array.isArray(all?.data)
+            ? all.data
+            : [];
+          rawList = enablerName
+            ? allRaw.filter((o) => o.created_by_name === enablerName)
+            : allRaw;
+        } catch (fallbackErr) {
+          console.error("Fallback loading opportunities failed:", fallbackErr);
+        }
       }
-    } catch (_) {}
-    const saved = JSON.parse(localStorage.getItem('enablerOpportunities') || '[]');
-    setOpportunities(saved);
-    setLoading(false);
+
+      const list = rawList.map(mapApiOpportunity);
+      setOpportunitiesList(list);
+    } catch (err) {
+      console.error("Error loading opportunities:", err);
+      setError(err.message || "Failed to load opportunities");
+      setOpportunitiesList([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     loadOpportunities();
   }, [loadOpportunities]);
 
+  useEffect(() => {
+    if (location.state?.refreshList) {
+      loadOpportunities();
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state?.refreshList, loadOpportunities, navigate, location.pathname]);
+
   const handleDelete = (id) => {
     setDeleteModal({ isOpen: true, id });
   };
 
-  const confirmDelete = () => {
-    const updated = opportunities.filter(opp => opp.id !== deleteModal.id);
-    setOpportunities(updated);
-    localStorage.setItem('enablerOpportunities', JSON.stringify(updated));
-    setDeleteModal({ isOpen: false, id: null });
-  };
-
-  const handleClearAll = () => {
-    setClearAllModal({ isOpen: true });
-  };
-
-  const confirmClearAll = () => {
-    setOpportunities([]);
-    localStorage.setItem('enablerOpportunities', JSON.stringify([]));
-    setClearAllModal({ isOpen: false });
+  const confirmDelete = async () => {
+    try {
+      await opportunities.delete(deleteModal.id);
+      setOpportunitiesList(prev => prev.filter(opp => opp.id !== deleteModal.id));
+    } catch (err) {
+      console.error("Error deleting opportunity:", err);
+      setError(err.message || "Failed to delete opportunity");
+    } finally {
+      setDeleteModal({ isOpen: false, id: null });
+    }
   };
 
   return (
@@ -83,7 +116,6 @@ const OpportunitiesPosted = () => {
       <div className="pt-20 px-4 md:px-8 lg:px-12 pb-8">
         <div className="max-w-6xl mx-auto">
           
-          {/* Page Header */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4 gap-3">
             <div>
               <h1 className="text-xl md:text-2xl font-bold text-black mb-1">
@@ -93,20 +125,27 @@ const OpportunitiesPosted = () => {
                 View and manage all your posted volunteering opportunities
               </p>
             </div>
-            {opportunities.length > 0 && (
-              <button
-                onClick={handleClearAll}
-                className="bg-[#6A00B1] text-white px-3 md:px-4 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-semibold hover:bg-[#5A0091] transition-colors flex items-center gap-2 whitespace-nowrap w-fit md:w-auto"
-              >
-                <i className="fa fa-check text-xs"></i>
-                Clear All
-              </button>
-            )}
+            <button
+              onClick={() => navigate('/create-opportunity')}
+              className="bg-[#6A00B1] text-white px-3 md:px-4 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-semibold hover:bg-[#5A0091] transition-colors flex items-center gap-2 whitespace-nowrap w-fit md:w-auto"
+            >
+              <i className="fa fa-plus text-xs"></i>
+              New Opportunity
+            </button>
           </div>
           
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+              {error}
+            </div>
+          )}
+          
           {loading ? (
-            <div className="text-center py-12 text-gray-500">Loading opportunities...</div>
-          ) : opportunities.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent mx-auto"></div>
+              <p className="text-gray-600 mt-4">Loading opportunities...</p>
+            </div>
+          ) : opportunitiesList.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-gray-500 text-lg mb-4">No opportunities posted yet.</p>
               <button
@@ -118,17 +157,15 @@ const OpportunitiesPosted = () => {
             </div>
           ) : (
             <div className="space-y-3">
-              {opportunities.map((opp) => (
+              {opportunitiesList.map((opp) => (
                 <div
                   key={opp.id}
                   className="bg-gray-100 rounded-lg p-3 md:p-4 flex items-start gap-3 md:gap-4"
                 >
-                  {/* Circular Placeholder Image */}
                   <div className="w-12 h-12 md:w-16 md:h-16 bg-gray-300 rounded-full flex-shrink-0 flex items-center justify-center">
                     <i className="fa fa-briefcase text-lg md:text-xl text-gray-500"></i>
                   </div>
 
-                  {/* Opportunity Details - Clickable */}
                   <div 
                     className="flex-1 min-w-0 cursor-pointer"
                     onClick={() => navigate(`/enabler/opportunity/${opp.id}`)}
@@ -137,14 +174,13 @@ const OpportunitiesPosted = () => {
                       {opp.title}
                     </h2>
                     <p className="text-gray-600 text-xs md:text-sm mb-1">
-                      {opp.experience ? `Experience: ${opp.experience}` : opp.qualifications ? `Requirements: ${Array.isArray(opp.qualifications) ? opp.qualifications.join(', ') : opp.qualifications}` : ''}
+                      {opp.type} · {opp.location}
                     </p>
                     <p className="text-gray-600 text-xs md:text-sm">
-                      {opp.skills ? `Skills: ${opp.skills}` : opp.location ? `Location: ${opp.location}` : ''}
+                      {opp.is_open ? 'Open for applications' : 'Closed'}
                     </p>
                   </div>
 
-                  {/* Action Buttons */}
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button
                       onClick={(e) => {
@@ -173,7 +209,6 @@ const OpportunitiesPosted = () => {
         </div>
       </div>
 
-      {/* Delete Confirmation Modal */}
       <Modal
         isOpen={deleteModal.isOpen}
         onClose={() => setDeleteModal({ isOpen: false, id: null })}
@@ -181,17 +216,6 @@ const OpportunitiesPosted = () => {
         title="Delete Opportunity"
         message="Are you sure you want to delete this opportunity?"
         confirmText="Delete"
-        type="danger"
-      />
-
-      {/* Clear All Confirmation Modal */}
-      <Modal
-        isOpen={clearAllModal.isOpen}
-        onClose={() => setClearAllModal({ isOpen: false })}
-        onConfirm={confirmClearAll}
-        title="Clear All Opportunities"
-        message="Are you sure you want to clear all opportunities? This action cannot be undone."
-        confirmText="Clear All"
         type="danger"
       />
     </div>
