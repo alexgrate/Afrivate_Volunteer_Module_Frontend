@@ -120,9 +120,10 @@ const ContactPathfinder = () => {
               </button>
               <button
                 type="submit"
-                className="bg-[#6A00B1] text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-[#5A0091] transition-colors"
+                disabled={sending}
+                className="bg-[#6A00B1] text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-[#5A0091] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Send message
+                {sending ? "Sending..." : "Send message"}
               </button>
             </div>
           </form>

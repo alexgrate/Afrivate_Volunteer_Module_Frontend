@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
 import { bookmarks, profile, applications } from "../../services/api";
@@ -14,9 +14,40 @@ const PathfinderProfile = () => {
   const [enablerId, setEnablerId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const enablerIdRef = useRef(enablerId);
+  enablerIdRef.current = enablerId;
 
   useEffect(() => {
     document.title = "Pathfinder Profile - AfriVate";
+  }, []);
+
+  const checkBookmarkStatus = useCallback(async (pathfinderId) => {
+    try {
+      let myEnablerId = enablerIdRef.current;
+      if (!myEnablerId) {
+        try {
+          const me = await profile.enablerGet();
+          if (me && me.id != null) {
+            myEnablerId = me.id;
+            setEnablerId(me.id);
+          }
+        } catch (_) {
+          // ignore - bookmark check will still try to match by pathfinder alone
+        }
+      }
+
+      const bookmarksList = await bookmarks.list();
+      const foundBookmark = bookmarksList.find((b) =>
+        b.pathfinder && String(b.pathfinder) === String(pathfinderId) &&
+        (!myEnablerId || String(b.enabler) === String(myEnablerId))
+      );
+      if (foundBookmark) {
+        setIsBookmarked(true);
+        setBookmarkId(foundBookmark.id);
+      }
+    } catch (err) {
+      console.error('Error checking bookmark status:', err);
+    }
   }, []);
 
   useEffect(() => {
@@ -94,7 +125,7 @@ const PathfinderProfile = () => {
             email,
           });
           if (data.id != null) {
-            checkBookmarkStatus(data.id);
+            await checkBookmarkStatus(data.id);
           }
         } else {
           setPathfinder(null);
@@ -108,37 +139,7 @@ const PathfinderProfile = () => {
       }
     };
     if (id) load();
-  }, [id, opportunityId]);
-
-  const checkBookmarkStatus = async (pathfinderId) => {
-    try {
-      // Ensure we have the current enabler id (profile.enablerGet returns the enabler profile)
-      let myEnablerId = enablerId;
-      if (!myEnablerId) {
-        try {
-          const me = await profile.enablerGet();
-          if (me && me.id != null) {
-            myEnablerId = me.id;
-            setEnablerId(me.id);
-          }
-        } catch (_) {
-          // ignore - bookmark check will still try to match by pathfinder alone
-        }
-      }
-
-      const bookmarksList = await bookmarks.list();
-      const foundBookmark = bookmarksList.find((b) =>
-        b.pathfinder && String(b.pathfinder) === String(pathfinderId) &&
-        (!myEnablerId || String(b.enabler) === String(myEnablerId))
-      );
-      if (foundBookmark) {
-        setIsBookmarked(true);
-        setBookmarkId(foundBookmark.id);
-      }
-    } catch (err) {
-      console.error('Error checking bookmark status:', err);
-    }
-  };
+  }, [id, opportunityId, checkBookmarkStatus]);
 
   const handleBookmark = async () => {
     if (isBookmarked && bookmarkId) {
@@ -196,7 +197,7 @@ const PathfinderProfile = () => {
         <EnablerNavbar />
         <div className="pt-20 px-4 md:px-8 lg:px-12 pb-8">
           <div className="max-w-4xl mx-auto text-center py-12">
-            <p className="text-gray-500">No pathfinder profile found.</p>
+            <p className="text-gray-500">{error || "No pathfinder profile found."}</p>
             <button
               onClick={() => navigate('/enabler/recommendations')}
               className="mt-4 text-[#6A00B1] font-semibold hover:underline"

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useUser } from '../context/UserContext';
 import { profile, getRole } from '../services/api';
 
 const defaultFormData = {
@@ -27,7 +26,6 @@ const defaultFormData = {
 };
 
 const Profile = () => {
-  const { user } = useUser();
   const [activeTab, setActiveTab] = useState('personal');
   const [formData, setFormData] = useState(defaultFormData);
   const [errors, setErrors] = useState({});

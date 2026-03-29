@@ -163,7 +163,6 @@ export function formatTextContent(text) {
 
   const lines = text.split("\n");
   const elements = [];
-  let currentList = null;
   let currentListType = null;
   let listItems = [];
 

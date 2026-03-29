@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
 import { applications } from "../../services/api";
-import { getOrgName, navigateToVolunteerDetails } from "../../utils/opportunityUtils";
+import { navigateToVolunteerDetails } from "../../utils/opportunityUtils";
 
 /**
  * Pathfinder's own applications only. Linked from "View active volunteering applications" on dashboard.

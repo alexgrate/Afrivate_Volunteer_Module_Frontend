@@ -100,6 +100,13 @@ const DashE = () => {
 
       {isOpen && <div className="fixed inset-0 bg-black bg-opacity-40 z-40 md:hidden" onClick={() => setIsOpen(false)} />}
 
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-24 mx-5 md:mx-20">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent" />
+          <p className="text-gray-600 mt-4 text-sm">Loading dashboard...</p>
+        </div>
+      ) : (
+      <>
       <div className="flex flex-col md:flex-row items-start justify-between mt-10 md:mt-10 mx-5 md:mx-20 my-7 gap-4 md:gap-0">
         <div>
           <p className="text-[#6A00B1] text-2xl sm:text-3xl font-sans font-bold">Welcome, Soma !</p>
@@ -153,6 +160,8 @@ const DashE = () => {
           </table>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 };

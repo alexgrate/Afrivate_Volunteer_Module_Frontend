@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
 import Toast from "../../components/common/Toast";
@@ -32,10 +32,13 @@ const ApplyApplication = () => {
   const [uploadingProfileCv, setUploadingProfileCv] = useState(false);
   const [customAnswers, setCustomAnswers] = useState({});
 
-  const customQuestions = opportunityId ? getCustomQuestions(opportunityId) : [];
-
   const [existingApplication, setExistingApplication] = useState(null);
   const [isEditMode, setIsEditMode] = useState(false);
+
+  const customQuestions = useMemo(
+    () => (opportunityId ? getCustomQuestions(opportunityId) : []),
+    [opportunityId]
+  );
 
   useEffect(() => {
     const job = location.state?.job;
@@ -186,7 +189,7 @@ const ApplyApplication = () => {
       });
     
     setLoading(false);
-  }, [opportunityId, location.state]);
+  }, [opportunityId, location.state, customQuestions]);
 
   useEffect(() => {
     document.title = isEditMode ? "View Application - AfriVate" : "Apply - AfriVate";

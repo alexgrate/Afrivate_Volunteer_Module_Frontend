@@ -19,11 +19,13 @@ const Applicants = () => {
     
     const loadData = async () => {
       setLoading(true);
+      let titleFromOpp = "";
       try {
         // Load opportunity details
         try {
           const oppData = await opportunities.get(opportunityId);
           if (oppData && oppData.title) {
+            titleFromOpp = oppData.title;
             setOpportunityTitle(oppData.title);
           }
         } catch (oppErr) {
@@ -46,7 +48,7 @@ const Applicants = () => {
             userId: app.user,
             pathfinderName: name,
             pathfinderEmail: email,
-            opportunityTitle: app.opportunity_title || opportunityTitle,
+            opportunityTitle: app.opportunity_title || titleFromOpp,
             status: app.status || "pending",
             applicationText: app.cover_letter || "",
             cvUrl: app.cv || app.cv_url || app.resume || app.document || null,
@@ -55,7 +57,7 @@ const Applicants = () => {
         
         setApplicationsList(mappedApps);
         
-        if (mappedApps.length > 0 && !opportunityTitle) {
+        if (mappedApps.length > 0 && !titleFromOpp) {
           setOpportunityTitle(mappedApps[0].opportunityTitle);
         }
       } catch (err) {
@@ -68,11 +70,6 @@ const Applicants = () => {
     
     loadData();
   }, [opportunityId]);
-
-  const handleDownloadCv = (app) => {
-    // CV download would need additional API endpoint
-    console.log("CV download not available via API");
-  };
 
   const handleStatusChange = async (appId, newStatus) => {
     setUpdatingStatus((prev) => ({ ...prev, [appId]: true }));

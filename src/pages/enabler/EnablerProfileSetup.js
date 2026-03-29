@@ -98,7 +98,7 @@ const EnablerProfileSetup = () => {
       const employeesVal = formData.employees === "" || formData.employees == null
         ? null
         : parseInt(formData.employees, 10);
-      const employees = (employeesVal !== employeesVal || employeesVal === "") ? null : employeesVal;
+      const employees = employeesVal == null || Number.isNaN(employeesVal) ? null : employeesVal;
 
       const baseDetails = {
         contact_email: formData.contact_email || "",

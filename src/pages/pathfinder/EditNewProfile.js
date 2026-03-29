@@ -1,10 +1,41 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
 import { profile, getApiErrorMessage } from "../../services/api";
 
+function extractSections(text) {
+  const lines = text.split(/\r?\n/);
+  const sections = {};
+  let current = null;
+  lines.forEach((raw) => {
+    const line = raw.trim();
+    const lower = line.toLowerCase();
+    if (lower.startsWith("work experience")) {
+      current = "work_experience";
+      sections[current] = [];
+      return;
+    }
+    if (lower.startsWith("education")) {
+      current = "educations";
+      sections[current] = [];
+      return;
+    }
+    if (lower.startsWith("certification") || lower.startsWith("certifications")) {
+      current = "certifications";
+      sections[current] = [];
+      return;
+    }
+    if (current) {
+      if (/^[A-Z][A-Za-z ]+:$/.test(line) && !line.includes("@")) {
+        current = null;
+        return;
+      }
+      if (line) sections[current].push(line);
+    }
+  });
+  return sections;
+}
+
 const EditNewProfile = () => {
-  const navigate = useNavigate();
   const photoInputRef = useRef(null);
 
   useEffect(() => {
@@ -42,60 +73,23 @@ const EditNewProfile = () => {
   const [loadedBaseDetailsId, setLoadedBaseDetailsId] = useState(null);
   const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
   const [cvFile, setCvFile] = useState(null);
-  const [credentials, setCredentials] = useState([]);
   const [uploadingCv, setUploadingCv] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState(null);
   const [currentCvUrl, setCurrentCvUrl] = useState(null);
   const [currentCvName, setCurrentCvName] = useState(null);
 
-  // Utility: attempt to parse text-based resumes for key sections
-  const extractSections = (text) => {
-    const lines = text.split(/\r?\n/);
-    const sections = {};
-    let current = null;
-    lines.forEach((raw) => {
-      const line = raw.trim();
-      const lower = line.toLowerCase();
-      if (lower.startsWith("work experience")) {
-        current = "work_experience";
-        sections[current] = [];
-        return;
-      }
-      if (lower.startsWith("education")) {
-        current = "educations";
-        sections[current] = [];
-        return;
-      }
-      if (lower.startsWith("certification") || lower.startsWith("certifications")) {
-        current = "certifications";
-        sections[current] = [];
-        return;
-      }
-      if (current) {
-        // stop on next heading-like line
-        if (/^[A-Z][A-Za-z ]+:$/.test(line) && !line.includes("@")) {
-          current = null;
-          return;
-        }
-        if (line) sections[current].push(line);
-      }
-    });
-    return sections;
-  };
-
-  const parseResumeFile = (file) => {
+  const parseResumeFile = useCallback((file) => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       const text = reader.result;
       if (typeof text !== "string") return;
       const sec = extractSections(text);
-      // populate states if we found anything
-      if (sec.work_experience && sec.work_experience.length && !formData.work_experience) {
-        setFormData((prev) => ({
-          ...prev,
-          work_experience: sec.work_experience.join("\n"),
-        }));
+      if (sec.work_experience && sec.work_experience.length) {
+        setFormData((prev) => {
+          if (prev.work_experience) return prev;
+          return { ...prev, work_experience: sec.work_experience.join("\n") };
+        });
       }
       if (sec.educations && sec.educations.length) {
         setEducations((prev) => {
@@ -110,16 +104,14 @@ const EditNewProfile = () => {
         });
       }
     };
-    // try to read as text; PDFs may not work
     reader.readAsText(file);
-  };
+  }, []);
 
-  // watch for cv file selection and attempt to parse it
   useEffect(() => {
     if (cvFile) {
       parseResumeFile(cvFile);
     }
-  }, [cvFile]);
+  }, [cvFile, parseResumeFile]);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -161,8 +153,7 @@ const EditNewProfile = () => {
       try {
         const credList = await profile.credentialsList();
         const credsArray = Array.isArray(credList) ? credList : credList?.results || [];
-        setCredentials(credsArray);
-        
+
         // Find and set the current CV
         const cvCred = credsArray.find((c) => 
           (c.document_name || c.name || "").toLowerCase().includes("cv")
@@ -241,8 +232,7 @@ const EditNewProfile = () => {
       // Reload credentials to get the new CV
       const newCredList = await profile.credentialsList();
       const newCreds = Array.isArray(newCredList) ? newCredList : newCredList?.results || [];
-      setCredentials(newCreds);
-      
+
       // Find and set the new CV URL
       const newCvCred = newCreds.find((c) => 
         (c.document_name || c.name || "").toLowerCase().includes("cv")

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
 import { useUser } from "../../context/UserContext";
-import { opportunities, applications, profile } from "../../services/api";
+import { opportunities, applications } from "../../services/api";
 
 const EnablerDashboard = () => {
   const navigate = useNavigate();
