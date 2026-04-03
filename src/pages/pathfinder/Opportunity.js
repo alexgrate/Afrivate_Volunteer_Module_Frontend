@@ -48,9 +48,20 @@ const Opportunity = () => {
     try {
       const api = await import("../../services/api");
       if (!api.getAccessToken()) return;
-      const data = await bookmarks.list();
-      const raw = Array.isArray(data) ? data : Array.isArray(data?.results) ? data.results : [];
-      const ids = new Set(raw.map((b) => String(b.opportunity_id ?? b.opportunity?.id ?? b.id)).filter(Boolean));
+      const data = await bookmarks.opportunitiesSavedList();
+      const raw = Array.isArray(data) ? data : data?.results || [];
+      const ids = new Set(
+        raw
+          .map((row) => {
+            const oid =
+              row.opportunity_id ??
+              (typeof row.opportunity === "number" || typeof row.opportunity === "string"
+                ? row.opportunity
+                : row.opportunity?.id);
+            return oid != null ? String(oid) : null;
+          })
+          .filter(Boolean)
+      );
       setSavedIds(ids);
     } catch (err) {
       console.error("Error loading saved IDs:", err);
@@ -96,10 +107,19 @@ const Opportunity = () => {
 
   const handleSave = async (item) => {
     try {
-      await bookmarks.opportunitiesSavedCreate({
-        opportunity_id: Number(item.id),
-      });
-      setSavedIds((prev) => new Set([...prev, item.id]));
+      if (savedIds.has(item.id)) {
+        await bookmarks.opportunitiesSavedDelete(Number(item.id));
+        setSavedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+      } else {
+        await bookmarks.opportunitiesSavedCreate({
+          opportunity_id: Number(item.id),
+        });
+        setSavedIds((prev) => new Set([...prev, item.id]));
+      }
     } catch (err) {
       console.error("Error saving opportunity:", err);
     }

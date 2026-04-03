@@ -6,17 +6,24 @@ import { bookmarks } from "../../services/api";
 import { getOrgName, navigateToVolunteerDetails } from "../../utils/opportunityUtils";
 
 function mapSavedToJob(s) {
-  const opp = s.opportunity || {};
+  const opp =
+    s.opportunity && typeof s.opportunity === "object" ? s.opportunity : {};
+  const opportunityId =
+    s.opportunity_id ??
+    (typeof s.opportunity === "number" || typeof s.opportunity === "string"
+      ? s.opportunity
+      : null) ??
+    opp.id ??
+    s.id;
   return {
-    id: opp.id ?? s.opportunity_id ?? s.id,
-    bookmarkId: s.id,
-    title: opp.title || "Opportunity",
+    id: opportunityId,
+    title: opp.title || s.title || "Opportunity",
     company: getOrgName(opp),
-    type: opp.opportunity_type || "Volunteering",
-    location: opp.location || "",
+    type: opp.opportunity_type || s.opportunity_type || "Volunteering",
+    location: opp.location || s.location || "",
     created_by: opp.created_by,
     link: opp.link,
-    _raw: opp,
+    _raw: Object.keys(opp).length ? opp : s,
   };
 }
 
@@ -31,7 +38,8 @@ const Bookmarks = () => {
     setError(null);
     try {
       const data = await bookmarks.opportunitiesSavedList();
-      const arr = Array.isArray(data) ? data.map(mapSavedToJob) : [];
+      const raw = Array.isArray(data) ? data : data?.results || [];
+      const arr = raw.map(mapSavedToJob).filter((j) => j.id != null);
       setBookmarkedJobs(arr);
     } catch (err) {
       console.error("Error loading bookmarks:", err);
@@ -56,14 +64,12 @@ const Bookmarks = () => {
   }, [loadBookmarks]);
 
   const handleRemoveBookmark = async (job) => {
-    const bookmarkId = job.bookmarkId;
-    if (bookmarkId != null) {
-      try {
-        await bookmarks.delete(bookmarkId);
-        setBookmarkedJobs((prev) => prev.filter((j) => j.bookmarkId !== bookmarkId));
-      } catch (err) {
-        console.error("Error removing bookmark:", err);
-      }
+    if (job.id == null) return;
+    try {
+      await bookmarks.opportunitiesSavedDelete(job.id);
+      setBookmarkedJobs((prev) => prev.filter((j) => j.id !== job.id));
+    } catch (err) {
+      console.error("Error removing bookmark:", err);
     }
   };
 
@@ -118,7 +124,7 @@ const Bookmarks = () => {
             <div className="flex flex-col gap-3">
               {bookmarkedJobs.map((job) => (
                 <div
-                  key={job.bookmarkId ?? job.id}
+                  key={String(job.id)}
                   className="bg-white border border-gray-200 rounded-lg p-3 flex items-center gap-3 hover:shadow-sm transition-all cursor-pointer"
                   onClick={(e) => {
                     if (e.target.closest('button')) return;

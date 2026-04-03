@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
 import Toast from "../../components/common/Toast";
-import { applications, opportunities } from "../../services/api";
+import { applications, opportunities, bookmarks } from "../../services/api";
 
 const Applicants = () => {
   const navigate = useNavigate();
@@ -13,6 +13,8 @@ const Applicants = () => {
   const [expandedId, setExpandedId] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState({});
   const [toast, setToast] = useState({ isOpen: false, message: "", type: "success" });
+  const [savedPathfinderIds, setSavedPathfinderIds] = useState(() => new Set());
+  const [bookmarkBusy, setBookmarkBusy] = useState({});
 
   useEffect(() => {
     document.title = "Applicants - AfriVate";
@@ -43,9 +45,12 @@ const Applicants = () => {
         // Map to the format needed by the UI - include full cover_letter text
         const mappedApps = forOpp.map((app) => {
           const { name, email } = parseContactDetails(app.cover_letter);
+          const bookmarkPathfinderId =
+            app.pathfinder ?? app.pathfinder_id ?? app.pathfinder_profile ?? app.user;
           return {
             id: app.id,
             userId: app.user,
+            bookmarkPathfinderId,
             pathfinderName: name,
             pathfinderEmail: email,
             opportunityTitle: app.opportunity_title || titleFromOpp,
@@ -54,8 +59,25 @@ const Applicants = () => {
             cvUrl: app.cv || app.cv_url || app.resume || app.document || null,
           };
         });
-        
+
         setApplicationsList(mappedApps);
+
+        try {
+          const saved = await bookmarks.applicantsSavedList();
+          const savedRows = Array.isArray(saved) ? saved : saved?.results || [];
+          const ids = new Set(
+            savedRows
+              .map((row) => {
+                const pid =
+                  row.pathfinder_id ?? row.pathfinder ?? row.pathfinder?.id;
+                return pid != null ? String(pid) : null;
+              })
+              .filter(Boolean)
+          );
+          setSavedPathfinderIds(ids);
+        } catch (e) {
+          console.error("Error loading saved applicants:", e);
+        }
         
         if (mappedApps.length > 0 && !titleFromOpp) {
           setOpportunityTitle(mappedApps[0].opportunityTitle);
@@ -96,6 +118,47 @@ const Applicants = () => {
       });
     } finally {
       setUpdatingStatus((prev) => ({ ...prev, [appId]: false }));
+    }
+  };
+
+  const applicantBookmarkKey = (app) =>
+    app.bookmarkPathfinderId != null ? String(app.bookmarkPathfinderId) : "";
+
+  const handleToggleApplicantBookmark = async (app) => {
+    const key = applicantBookmarkKey(app);
+    if (!key) {
+      setToast({
+        isOpen: true,
+        message: "Could not bookmark this applicant (missing id).",
+        type: "error",
+      });
+      return;
+    }
+    setBookmarkBusy((prev) => ({ ...prev, [app.id]: true }));
+    try {
+      if (savedPathfinderIds.has(key)) {
+        await bookmarks.applicantsSavedDelete(app.bookmarkPathfinderId);
+        setSavedPathfinderIds((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      } else {
+        await bookmarks.applicantsSavedCreate({
+          pathfinder_id: app.bookmarkPathfinderId,
+          opportunity_id: Number(opportunityId),
+        });
+        setSavedPathfinderIds((prev) => new Set(prev).add(key));
+      }
+    } catch (err) {
+      console.error("Bookmark toggle failed:", err);
+      setToast({
+        isOpen: true,
+        message: "Could not update bookmark. Please try again.",
+        type: "error",
+      });
+    } finally {
+      setBookmarkBusy((prev) => ({ ...prev, [app.id]: false }));
     }
   };
 
@@ -232,13 +295,34 @@ const Applicants = () => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/enabler/pathfinder/${app.userId || app.id}`, {
-                              state: { opportunityId: parseInt(opportunityId) }
+                            const pid = app.userId ?? app.bookmarkPathfinderId;
+                            if (!pid) return;
+                            navigate(`/enabler/pathfinder/${pid}`, {
+                              state: { opportunityId: parseInt(opportunityId, 10) },
                             });
                           }}
                           className="bg-[#E0C6FF] text-[#6A00B1] px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-[#D0B6FF]"
                         >
                           View Profile
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleApplicantBookmark(app);
+                          }}
+                          disabled={bookmarkBusy[app.id] || !applicantBookmarkKey(app)}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors disabled:opacity-50 ${
+                            savedPathfinderIds.has(applicantBookmarkKey(app))
+                              ? "border-[#6A00B1] bg-purple-50 text-[#6A00B1]"
+                              : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                          }`}
+                        >
+                          {bookmarkBusy[app.id]
+                            ? "…"
+                            : savedPathfinderIds.has(applicantBookmarkKey(app))
+                              ? "Saved"
+                              : "Bookmark"}
                         </button>
                         <button
                           onClick={(e) => {

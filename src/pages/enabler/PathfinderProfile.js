@@ -22,7 +22,22 @@ const PathfinderProfile = () => {
   }, []);
 
   const checkBookmarkStatus = useCallback(async (pathfinderId) => {
+    const oppId = location.state?.opportunityId;
     try {
+      if (oppId != null && oppId !== "") {
+        const saved = await bookmarks.applicantsSavedList();
+        const list = Array.isArray(saved) ? saved : saved?.results || [];
+        const idStr = String(pathfinderId);
+        const isSaved = list.some((row) => {
+          const pid =
+            row.pathfinder_id ?? row.pathfinder ?? row.pathfinder?.id;
+          return pid != null && String(pid) === idStr;
+        });
+        setIsBookmarked(isSaved);
+        setBookmarkId(null);
+        return;
+      }
+
       let myEnablerId = enablerIdRef.current;
       if (!myEnablerId) {
         try {
@@ -37,10 +52,10 @@ const PathfinderProfile = () => {
       }
 
       const bookmarksList = await bookmarks.list();
-      const foundBookmark = bookmarksList.find((b) =>
+      const arr = Array.isArray(bookmarksList) ? bookmarksList : bookmarksList?.results || [];
+      const foundBookmark = arr.find((b) =>
         b.pathfinder && String(b.pathfinder) === String(pathfinderId) &&
-        (!myEnablerId || String(b.enabler) === String(myEnablerId))
-      );
+        (!myEnablerId || String(b.enabler) === String(myEnablerId)));
       if (foundBookmark) {
         setIsBookmarked(true);
         setBookmarkId(foundBookmark.id);
@@ -48,7 +63,7 @@ const PathfinderProfile = () => {
     } catch (err) {
       console.error('Error checking bookmark status:', err);
     }
-  }, []);
+  }, [location.state?.opportunityId]);
 
   useEffect(() => {
     const load = async () => {
@@ -142,6 +157,29 @@ const PathfinderProfile = () => {
   }, [id, opportunityId, checkBookmarkStatus]);
 
   const handleBookmark = async () => {
+    const oppId = location.state?.opportunityId;
+    const applicantFlow = oppId != null && oppId !== "";
+
+    if (applicantFlow) {
+      try {
+        if (isBookmarked) {
+          await bookmarks.applicantsSavedDelete(pathfinder.id);
+          setIsBookmarked(false);
+          setBookmarkId(null);
+        } else {
+          await bookmarks.applicantsSavedCreate({
+            pathfinder_id: pathfinder.id,
+            opportunity_id: Number(oppId),
+          });
+          setIsBookmarked(true);
+          setBookmarkId(null);
+        }
+      } catch (err) {
+        console.error('Error toggling applicant bookmark:', err, err?.body || null);
+      }
+      return;
+    }
+
     if (isBookmarked && bookmarkId) {
       try {
         await bookmarks.delete(bookmarkId);

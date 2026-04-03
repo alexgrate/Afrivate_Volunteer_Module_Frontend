@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
+import Toast from "../../components/common/Toast";
 import { bookmarks, profile } from "../../services/api";
 
 /**
@@ -16,6 +17,7 @@ const EnablerProfileView = () => {
   const [bookmarkId, setBookmarkId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [toast, setToast] = useState({ isOpen: false, message: "", type: "error" });
 
   useEffect(() => {
     document.title = "Enabler Profile - AfriVate";
@@ -95,7 +97,11 @@ const EnablerProfileView = () => {
         setBookmarkId(null);
       } catch (err) {
         console.error("Error removing bookmark:", err);
-        alert("Failed to remove bookmark.");
+        setToast({
+          isOpen: true,
+          message: "We couldn't remove that bookmark. Please try again in a moment.",
+          type: "error",
+        });
       }
     } else {
       try {
@@ -106,7 +112,11 @@ const EnablerProfileView = () => {
         }
       } catch (err) {
         console.error("Error creating bookmark:", err);
-        alert("Failed to save enabler.");
+        setToast({
+          isOpen: true,
+          message: "We couldn't save this organization to your bookmarks. Please try again.",
+          type: "error",
+        });
       }
     }
   };
@@ -289,6 +299,12 @@ const EnablerProfileView = () => {
           </div>
         </div>
       </div>
+      <Toast
+        isOpen={toast.isOpen}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

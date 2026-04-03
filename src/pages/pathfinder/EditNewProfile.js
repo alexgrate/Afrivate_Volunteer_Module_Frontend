@@ -427,7 +427,7 @@ const EditNewProfile = () => {
                 <button
                   type="button"
                   onClick={() => photoInputRef.current?.click()}
-                  className="w-24 h-24 md:w-28 md:h-28 rounded-full overflow-hidden bg-[#E4E4E4] relative border-2 border-transparent hover:border-[#6A00B1] transition-colors focus:outline-none focus:ring-2 focus:ring-[#6A00B1]"
+                  className="w-24 h-24 md:w-28 md:h-28 rounded-full overflow-hidden bg-[#E4E4E4] relative border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-[#6A00B1]"
                 >
                   {profilePhotoUrl ? (
                     <img src={profilePhotoUrl} alt="Profile" className="w-full h-full object-cover" />

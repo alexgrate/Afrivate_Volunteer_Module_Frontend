@@ -12,7 +12,6 @@ const VolunteerDetails = () => {
   const [jobData, setJobData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isBookmarked, setIsBookmarked] = useState(false);
-  const [bookmarkId, setBookmarkId] = useState(null);
   const [similarOpportunities, setSimilarOpportunities] = useState([]);
   const [orgProfile, setOrgProfile] = useState(null);
   const [existingApplication, setExistingApplication] = useState(null);
@@ -137,20 +136,18 @@ const VolunteerDetails = () => {
 
   const checkBookmarkStatus = async (id) => {
     try {
-      const response = await bookmarks.list();
-      if (response && Array.isArray(response)) {
-        const found = response.find(
-          (b) =>
-            b.opportunity_id === parseInt(id) ||
-            b.opportunity_id === id ||
-            b.opportunity?.id === parseInt(id) ||
-            b.opportunity?.id === id
-        );
-        if (found) {
-          setIsBookmarked(true);
-          setBookmarkId(found.id);
-        }
-      }
+      const response = await bookmarks.opportunitiesSavedList();
+      const arr = Array.isArray(response) ? response : response?.results || [];
+      const idStr = String(id);
+      const found = arr.some((row) => {
+        const oid =
+          row.opportunity_id ??
+          (typeof row.opportunity === "number" || typeof row.opportunity === "string"
+            ? row.opportunity
+            : row.opportunity?.id);
+        return oid != null && String(oid) === idStr;
+      });
+      setIsBookmarked(!!found);
     } catch (error) {
       console.log("Error checking bookmark status:", error);
     }
@@ -158,18 +155,15 @@ const VolunteerDetails = () => {
 
   const handleBookmarkToggle = async () => {
     try {
-      if (isBookmarked && bookmarkId) {
-        await bookmarks.delete(bookmarkId);
+      const oppId = parseInt(jobData.id, 10);
+      if (isBookmarked) {
+        await bookmarks.opportunitiesSavedDelete(oppId);
         setIsBookmarked(false);
-        setBookmarkId(null);
       } else {
-        const response = await bookmarks.opportunitiesSavedCreate({
-          opportunity_id: parseInt(jobData.id)
+        await bookmarks.opportunitiesSavedCreate({
+          opportunity_id: oppId,
         });
-        if (response && response.id) {
-          setIsBookmarked(true);
-          setBookmarkId(response.id);
-        }
+        setIsBookmarked(true);
       }
     } catch (error) {
       console.error("Bookmark toggle error:", error);

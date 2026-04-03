@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
+import Toast from "../../components/common/Toast";
 import { opportunities, bookmarks, applications } from "../../services/api";
 import { getOrgName, navigateToVolunteerDetails } from "../../utils/opportunityUtils";
 import { parseDescription } from "../../utils/descriptionUtils";
@@ -37,6 +38,7 @@ const AvailableOpportunities = () => {
   const [error, setError] = useState(null);
   const [savedIds, setSavedIds] = useState(new Set());
   const [appliedMap, setAppliedMap] = useState({});
+  const [toast, setToast] = useState({ isOpen: false, message: "", type: "error" });
 
   const loadOpportunities = useCallback(async () => {
     setLoading(true);
@@ -59,9 +61,20 @@ const AvailableOpportunities = () => {
     try {
       const api = await import("../../services/api");
       if (!api.getAccessToken()) return;
-      const data = await bookmarks.list();
-      const raw = Array.isArray(data) ? data : Array.isArray(data?.results) ? data.results : [];
-      const ids = new Set(raw.map((b) => String(b.opportunity_id ?? b.opportunity?.id ?? b.id)).filter(Boolean));
+      const data = await bookmarks.opportunitiesSavedList();
+      const raw = Array.isArray(data) ? data : data?.results || [];
+      const ids = new Set(
+        raw
+          .map((row) => {
+            const oid =
+              row.opportunity_id ??
+              (typeof row.opportunity === "number" || typeof row.opportunity === "string"
+                ? row.opportunity
+                : row.opportunity?.id);
+            return oid != null ? String(oid) : null;
+          })
+          .filter(Boolean)
+      );
       setSavedIds(ids);
     } catch (err) {
       console.error("Error loading saved IDs:", err);
@@ -118,7 +131,11 @@ const AvailableOpportunities = () => {
       setSavedIds((prev) => new Set([...prev, item.id]));
     } catch (err) {
       console.error("Error saving opportunity:", err);
-      alert("Failed to save opportunity. Please try again.");
+      setToast({
+        isOpen: true,
+        message: "We couldn't save that opportunity. Check your connection and try again.",
+        type: "error",
+      });
     }
   };
 
@@ -207,7 +224,7 @@ const AvailableOpportunities = () => {
                     className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
                       filterType === type
                         ? "bg-[#6A00B1] text-white"
-                        : "bg-white border border-gray-300 text-gray-700 hover:border-[#6A00B1]"
+                        : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
                     }`}
                   >
                     {type.charAt(0).toUpperCase() + type.slice(1)}
@@ -337,6 +354,12 @@ const AvailableOpportunities = () => {
           )}
         </div>
       </div>
+      <Toast
+        isOpen={toast.isOpen}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

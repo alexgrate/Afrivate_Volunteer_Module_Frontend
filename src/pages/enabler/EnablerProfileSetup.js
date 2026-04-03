@@ -210,13 +210,12 @@ const EnablerProfileSetup = () => {
   return (
     <div className="min-h-screen bg-white font-sans">
       <EnablerNavbar />
-      {toast.isOpen && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(prev => ({ ...prev, isOpen: false }))}
-        />
-      )}
+      <Toast
+        isOpen={toast.isOpen}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast(prev => ({ ...prev, isOpen: false }))}
+      />
       
       {/* Main Content */}
       <div className="pt-20 px-4 md:px-6 pb-8">
