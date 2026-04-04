@@ -254,7 +254,7 @@ export const auth = {
 
 export const bookmark = {
   list() {
-    return request("GET", "/bookmark/bookmark/");
+    return request("GET", "/bookmark/");
   },
 
   // Updated: Now accepts full opportunity object along with opportunity_id
@@ -267,11 +267,11 @@ export const bookmark = {
     if (body.pathfinder != null) data.pathfinder = body.pathfinder;
     // log for debug so picking up server validation errors easier
     console.debug("bookmark.create payload", data);
-    return request("POST", "/bookmark/bookmark/", { data });
+    return request("POST", "/bookmark/", { data });
   },
 
   delete(id) {
-    return request("DELETE", `/bookmark/bookmark/${id}/delete/`);
+    return request("DELETE", `/bookmark/${id}/delete/`);
   },
 
   opportunitiesList() {
