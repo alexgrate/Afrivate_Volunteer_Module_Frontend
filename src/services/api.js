@@ -503,46 +503,63 @@ export const applications = {
     return request("PATCH", `/applications/${id}/change_status/`, { data: body });
   },
 
-  // View applicant profile by opportunity (opportunityId, pathfinderId)
-  getApplicantProfile(opportunityId, pathfinderId) {
-    return request("GET", `/opportunities/opportunities/${opportunityId}/applicants/${pathfinderId}/`);
+  /**
+   * @deprecated Use opportunities.getApplicant — same endpoint, kept for imports that still use applications.
+   */
+  getApplicantProfile(opportunityId, applicantId) {
+    return request(
+      "GET",
+      `/opportunities/${opportunityId}/applicants/${applicantId}/`
+    );
   },
 };
 
 // --- Opportunities ---
+// Paths: GET/POST /api/opportunities/, GET /api/opportunities/mine/, CRUD /api/opportunities/<pk>/,
+// applicants GET /api/opportunities/<pk>/applicants/, single applicant GET .../applicants/<applicant_id>/
 
 export const opportunities = {
   list(params = {}) {
     const query = new URLSearchParams(params).toString();
-    return request("GET", `/opportunities/opportunities/${query ? `?${query}` : ''}`);
+    return request("GET", `/opportunities/${query ? `?${query}` : ""}`);
   },
 
   create(body) {
-    return request("POST", "/opportunities/opportunities/", { data: body });
+    return request("POST", "/opportunities/", { data: body });
   },
 
   mine() {
-    return request("GET", "/opportunities/opportunities/mine/");
+    return request("GET", "/opportunities/mine/");
   },
 
   mineCreate(body) {
-    return request("POST", "/opportunities/opportunities/mine/", { data: body });
+    return request("POST", "/opportunities/mine/", { data: body });
   },
 
   get(id) {
-    return request("GET", `/opportunities/opportunities/${id}/`);
+    return request("GET", `/opportunities/${id}/`);
   },
 
   update(id, body) {
-    return request("PUT", `/opportunities/opportunities/${id}/`, { data: body });
+    return request("PUT", `/opportunities/${id}/`, { data: body });
   },
 
   patch(id, body) {
-    return request("PATCH", `/opportunities/opportunities/${id}/`, { data: body });
+    return request("PATCH", `/opportunities/${id}/`, { data: body });
   },
 
   delete(id) {
-    return request("DELETE", `/opportunities/opportunities/${id}/`);
+    return request("DELETE", `/opportunities/${id}/`);
+  },
+
+  /** Enabler: all applicants for an opportunity. GET /api/opportunities/<pk>/applicants/ */
+  applicantsList(opportunityId) {
+    return request("GET", `/opportunities/${opportunityId}/applicants/`);
+  },
+
+  /** Enabler: one applicant (pathfinder) for an opportunity. GET /api/opportunities/<pk>/applicants/<applicant_id>/ */
+  getApplicant(opportunityId, applicantId) {
+    return request("GET", `/opportunities/${opportunityId}/applicants/${applicantId}/`);
   },
 };
 

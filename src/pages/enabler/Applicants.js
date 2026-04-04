@@ -34,13 +34,21 @@ const Applicants = () => {
           console.error("Error loading opportunity:", oppErr);
         }
 
-        // Load applications from API
-        const appsData = await applications.list();
-        
-        // Filter applications for this opportunity
-        const forOpp = appsData.filter(
-          (a) => String(a.opportunity) === String(opportunityId) || String(a.opportunity?.id) === String(opportunityId)
-        );
+        // Load applicants for this opportunity (preferred: opportunity-scoped endpoint)
+        let forOpp = [];
+        try {
+          const raw = await opportunities.applicantsList(opportunityId);
+          forOpp = Array.isArray(raw) ? raw : raw?.results || [];
+        } catch (scopeErr) {
+          console.warn("applicantsList failed, falling back to applications.list:", scopeErr);
+          const appsData = await applications.list();
+          const all = Array.isArray(appsData) ? appsData : appsData?.results || [];
+          forOpp = all.filter(
+            (a) =>
+              String(a.opportunity) === String(opportunityId) ||
+              String(a.opportunity?.id) === String(opportunityId)
+          );
+        }
         
         // Map to the format needed by the UI - include full cover_letter text
         const mappedApps = forOpp.map((app) => {

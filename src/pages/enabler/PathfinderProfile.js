@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
-import { bookmarks, profile, applications } from "../../services/api";
+import { bookmarks, profile, opportunities } from "../../services/api";
 
 const PathfinderProfile = () => {
   const navigate = useNavigate();
@@ -90,7 +90,7 @@ const PathfinderProfile = () => {
         if (opportunityId) {
           try {
             // Use the opportunity ID to fetch applicant profile
-            data = await applications.getApplicantProfile(opportunityId, id);
+            data = await opportunities.getApplicant(opportunityId, id);
           } catch (err) {
             console.log("Could not fetch applicant profile, using regular pathfinder profile:", err);
             data = await profile.pathfinderGetById(id);
