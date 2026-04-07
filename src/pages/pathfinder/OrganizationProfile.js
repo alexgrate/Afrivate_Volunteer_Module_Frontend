@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
-import { profile } from "../../services/api";
+import Toast from "../../components/common/Toast";
+import { profile, bookmarks, getAccessToken, getRole } from "../../services/api";
+import { normalizeBookmarkList, findEnablerBookmarkRow } from "../../utils/bookmarkHelpers";
 
 /**
  * Public view of an enabler/organization profile.
@@ -15,6 +17,9 @@ const OrganizationProfile = () => {
   const [profileData, setProfileData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [bookmarkId, setBookmarkId] = useState(null);
+  const [toast, setToast] = useState({ isOpen: false, message: "", type: "error" });
 
   useEffect(() => {
     document.title = "Organization Profile - AfriVate";
@@ -32,6 +37,23 @@ const OrganizationProfile = () => {
       try {
         const data = await profile.enablerGetById(id);
         setProfileData(data);
+        if (data?.id != null && getAccessToken() && getRole() === "pathfinder") {
+          try {
+            const raw = await bookmarks.list();
+            const list = normalizeBookmarkList(raw);
+            const row = findEnablerBookmarkRow(list, data.id);
+            if (row) {
+              setIsBookmarked(true);
+              setBookmarkId(row.id ?? row.pk ?? null);
+            } else {
+              setIsBookmarked(false);
+              setBookmarkId(null);
+            }
+          } catch (_) {
+            setIsBookmarked(false);
+            setBookmarkId(null);
+          }
+        }
       } catch (err) {
         console.error("Error loading organization profile:", err);
         setProfileData(null);
@@ -42,6 +64,55 @@ const OrganizationProfile = () => {
     };
     load();
   }, [id]);
+
+  const handleBookmark = async () => {
+    const enablerPk = profileData?.id;
+    if (enablerPk == null || !getAccessToken() || getRole() !== "pathfinder") {
+      setToast({
+        isOpen: true,
+        message: "Sign in as a pathfinder to bookmark organizations.",
+        type: "error",
+      });
+      return;
+    }
+
+    if (isBookmarked) {
+      try {
+        let idToDelete = bookmarkId;
+        if (idToDelete == null) {
+          const raw = await bookmarks.list();
+          const list = normalizeBookmarkList(raw);
+          const row = findEnablerBookmarkRow(list, enablerPk);
+          idToDelete = row?.id ?? row?.pk;
+        }
+        if (idToDelete != null) await bookmarks.delete(idToDelete);
+        setIsBookmarked(false);
+        setBookmarkId(null);
+        setToast({ isOpen: true, message: "Removed from bookmarks.", type: "success" });
+      } catch (err) {
+        console.error(err);
+        setToast({
+          isOpen: true,
+          message: "Could not remove bookmark. Try again.",
+          type: "error",
+        });
+      }
+    } else {
+      try {
+        const res = await bookmarks.create({ enabler: enablerPk });
+        setIsBookmarked(true);
+        setBookmarkId(res?.id ?? res?.pk ?? null);
+        setToast({ isOpen: true, message: "Organization saved to bookmarks.", type: "success" });
+      } catch (err) {
+        console.error(err);
+        setToast({
+          isOpen: true,
+          message: "Could not save bookmark. Try again.",
+          type: "error",
+        });
+      }
+    }
+  };
 
   const base = profileData?.base_details || {};
   const displayName = profileData?.name || stateData.name || "Organization";
@@ -116,6 +187,20 @@ const OrganizationProfile = () => {
                 <h1 className="text-2xl md:text-3xl font-bold mb-1">{displayName}</h1>
                 {profileData?.role && <p className="text-white/80 mb-2">{profileData.role}</p>}
                 {base.bio && <p className="text-white/90 text-sm max-w-xl">{base.bio}</p>}
+                {getAccessToken() && getRole() === "pathfinder" && profileData?.id != null && (
+                  <button
+                    type="button"
+                    onClick={handleBookmark}
+                    className={`mt-4 px-5 py-2 rounded-lg font-semibold text-sm transition-colors ${
+                      isBookmarked
+                        ? "bg-white text-[#6A00B1] hover:bg-gray-100"
+                        : "bg-white/20 border border-white/40 hover:bg-white/30"
+                    }`}
+                  >
+                    <i className={`fa fa-bookmark mr-2 ${isBookmarked ? "fas" : "far"}`} />
+                    {isBookmarked ? "Saved" : "Save organization"}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -200,6 +285,12 @@ const OrganizationProfile = () => {
           )}
         </div>
       </div>
+      <Toast
+        isOpen={toast.isOpen}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast((t) => ({ ...t, isOpen: false }))}
+      />
     </div>
   );
 };

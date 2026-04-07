@@ -162,9 +162,13 @@ export const auth = {
     return request("POST", "/auth/register/", { data: body });
   },
 
-  // Logout - POST with Bearer token (no body)
+  /**
+   * Blacklist refresh token on server. Sends refresh in body per backend contract.
+   */
   logout() {
-    return request("POST", "/auth/logout/");
+    const refresh = getRefreshToken();
+    const data = refresh ? { refresh } : {};
+    return request("POST", "/auth/logout/", { data });
   },
 
   token(body) {
@@ -179,12 +183,27 @@ export const auth = {
     return request("POST", "/auth/forgot-password/", { data: body });
   },
 
+  /** Email signup: verify 6-digit OTP; returns JWT tokens when successful. */
   verifyOtp(body) {
     return request("POST", "/auth/verify-otp/", { data: body });
   },
 
+  /** Forgot password: verify reset OTP; response includes uid (or similar) for reset step. */
+  verifyPasswordResetOtp(body) {
+    return request("POST", "/auth/verify-password-reset-otp/", { data: body });
+  },
+
+  /**
+   * Set new password after reset. Prefer { uid, new_password, confirm_password }.
+   * Legacy: { email, new_password, confirm_password } if uid missing.
+   */
   resetPassword(body) {
     return request("POST", "/auth/reset-password/", { data: body });
+  },
+
+  /** Logged-in user (e.g. Google-only): add email/password. */
+  setPassword(body) {
+    return request("POST", "/auth/set-password/", { data: body });
   },
 
   changePassword(body) {
@@ -195,6 +214,15 @@ export const auth = {
     return request("POST", "/auth/verify-email/", { data: body });
   },
 
+  googlePathfinder(body) {
+    return request("POST", "/auth/google/pathfinder/", { data: body });
+  },
+
+  googleEnabler(body) {
+    return request("POST", "/auth/google/enabler/", { data: body });
+  },
+
+  /** Legacy single-route Google auth (fallback if role-specific routes unavailable). */
   google(body) {
     return request("POST", "/auth/google/", { data: body });
   },
@@ -244,11 +272,44 @@ export const auth = {
     return request("PATCH", "/auth/user/", { data: body });
   },
 
-  // NEW: Delete user account (for both enabler and pathfinder)
-  deleteAccount() {
-    return request("DELETE", "/auth/user/");
+  /**
+   * Delete account. Prefers DELETE /auth/delete-account/; falls back to /auth/user/.
+   */
+  async deleteAccount() {
+    try {
+      return await request("DELETE", "/auth/delete-account/");
+    } catch (e) {
+      if (e.status === 404) {
+        return request("DELETE", "/auth/user/");
+      }
+      throw e;
+    }
   },
 };
+
+/**
+ * Google OAuth: signup uses role-specific URL; login tries pathfinder then enabler, then legacy /auth/google/.
+ */
+export async function googleAuthWithRole({ idToken, mode, role }) {
+  const data = { id_token: idToken };
+  if (mode === "signup") {
+    if (role === "enabler") {
+      return auth.googleEnabler(data);
+    }
+    return auth.googlePathfinder(data);
+  }
+  try {
+    return await auth.googlePathfinder(data);
+  } catch (e1) {
+    if (e1.status !== 400 && e1.status !== 404) throw e1;
+    try {
+      return await auth.googleEnabler(data);
+    } catch (e2) {
+      if (e2.status !== 400 && e2.status !== 404) throw e2;
+      return auth.google(data);
+    }
+  }
+}
 
 // --- Bookmarks ---
 
@@ -572,6 +633,7 @@ const apiClient = {
   setRole,
   getRole,
   request,
+  googleAuthWithRole,
   auth,
   bookmark,
   bookmarks: bookmark, // Alias for backward compatibility

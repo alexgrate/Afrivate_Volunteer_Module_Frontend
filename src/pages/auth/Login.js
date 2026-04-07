@@ -52,30 +52,50 @@ const Login = () => {
     setServerError('');
   
     try {
-      const data = await api.auth.token({
-        email: formData.email,
-        password: formData.password,
-      });
-  
+      let data;
+      try {
+        data = await api.auth.login({
+          username_or_email: formData.email.trim(),
+          password: formData.password,
+        });
+      } catch (loginErr) {
+        try {
+          data = await api.auth.token({
+            email: formData.email.trim(),
+            password: formData.password,
+          });
+        } catch {
+          throw loginErr;
+        }
+      }
+
       if (data.access) {
         api.setTokens(data.access, data.refresh);
 
+        if (data.role === 'enabler' || data.role === 'pathfinder') {
+          api.setRole(data.role);
+        }
+
         // Determine role from backend: try enabler first, then pathfinder.
         // Backend returns 403 for wrong role (e.g. pathfinder user on enabler endpoint).
-        let role = null;
+        let role =
+          api.getRole() === 'enabler' || api.getRole() === 'pathfinder'
+            ? api.getRole()
+            : null;
 
-        try {
-          const enabler = await api.profile.enablerGet();
-          if (enabler && enabler.id != null) {
-            api.setRole('enabler');
-            role = 'enabler';
-          }
-        } catch (enablerErr) {
-          // 403/404 = user is not an enabler; try pathfinder below
-          if (enablerErr.status !== 403 && enablerErr.status !== 404) {
-            setServerError(getApiErrorMessage(enablerErr) || 'Login failed');
-            setLoading(false);
-            return;
+        if (!role) {
+          try {
+            const enabler = await api.profile.enablerGet();
+            if (enabler && enabler.id != null) {
+              api.setRole('enabler');
+              role = 'enabler';
+            }
+          } catch (enablerErr) {
+            if (enablerErr.status !== 403 && enablerErr.status !== 404) {
+              setServerError(getApiErrorMessage(enablerErr) || 'Login failed');
+              setLoading(false);
+              return;
+            }
           }
         }
 

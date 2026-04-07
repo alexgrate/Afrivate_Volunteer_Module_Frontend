@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Input from '../../components/common/Input';
 import Button from '../../components/common/Button';
-import api from '../../services/api';
+import api, { getApiErrorMessage } from '../../services/api';
 
 const RESET_EMAIL_KEY = 'resetPasswordEmail';
+const RESET_UID_KEY = 'passwordResetUid';
+const RESET_TOKEN_KEY = 'passwordResetToken';
 
 const ResetPassword = () => {
   const navigate = useNavigate();
@@ -17,7 +19,9 @@ const ResetPassword = () => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!sessionStorage.getItem(RESET_EMAIL_KEY)) {
+    const uid = sessionStorage.getItem(RESET_UID_KEY);
+    const email = sessionStorage.getItem(RESET_EMAIL_KEY);
+    if (!uid && !email) {
       navigate('/forgot-password', { replace: true });
     }
   }, [navigate]);
@@ -49,24 +53,34 @@ const ResetPassword = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
+    const uid = sessionStorage.getItem(RESET_UID_KEY);
     const email = sessionStorage.getItem(RESET_EMAIL_KEY);
-    if (!email) {
+    const token = sessionStorage.getItem(RESET_TOKEN_KEY);
+    if (!uid && !email) {
       navigate('/forgot-password', { replace: true });
       return;
     }
     setLoading(true);
     setServerError('');
     try {
-      await api.auth.resetPassword({
-        email,
+      const payload = {
         new_password: formData.newPassword,
         confirm_password: formData.confirmPassword,
-      });
+      };
+      if (uid) {
+        payload.uid = uid;
+        if (token) payload.token = token;
+      } else {
+        payload.email = email;
+      }
+      await api.auth.resetPassword(payload);
       sessionStorage.removeItem(RESET_EMAIL_KEY);
+      sessionStorage.removeItem(RESET_UID_KEY);
+      sessionStorage.removeItem(RESET_TOKEN_KEY);
+      sessionStorage.removeItem('forgotPasswordEmail');
       navigate('/login', { replace: true });
     } catch (err) {
-      const msg = err.body?.detail || err.body?.message || err.message || 'Password reset failed';
-      setServerError(typeof msg === 'string' ? msg : 'Password reset failed');
+      setServerError(getApiErrorMessage(err) || 'Password reset failed');
     } finally {
       setLoading(false);
     }

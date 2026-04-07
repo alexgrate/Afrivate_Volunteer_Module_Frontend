@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
 import Toast from "../../components/common/Toast";
 import { bookmarks, profile } from "../../services/api";
+import { normalizeBookmarkList, findEnablerBookmarkRow } from "../../utils/bookmarkHelpers";
 
 /**
  * Pathfinder's view of an enabler/organization profile.
@@ -75,14 +76,15 @@ const EnablerProfileView = () => {
 
   const checkBookmarkStatus = async (enablerId) => {
     try {
-      const bookmarksList = await bookmarks.list();
-      // Check for enabler bookmarks (similar structure to pathfinder bookmarks)
-      const foundBookmark = bookmarksList.find(
-        (b) => b.enabler && String(b.enabler) === String(enablerId)
-      );
+      const raw = await bookmarks.list();
+      const bookmarksList = normalizeBookmarkList(raw);
+      const foundBookmark = findEnablerBookmarkRow(bookmarksList, enablerId);
       if (foundBookmark) {
         setIsBookmarked(true);
-        setBookmarkId(foundBookmark.id);
+        setBookmarkId(foundBookmark.id ?? foundBookmark.pk ?? null);
+      } else {
+        setIsBookmarked(false);
+        setBookmarkId(null);
       }
     } catch (err) {
       console.error("Error checking bookmark status:", err);
@@ -90,11 +92,27 @@ const EnablerProfileView = () => {
   };
 
   const handleBookmark = async () => {
-    if (isBookmarked && bookmarkId) {
+    if (!enabler?.id) return;
+
+    if (isBookmarked) {
       try {
-        await bookmarks.delete(bookmarkId);
+        let idToDelete = bookmarkId;
+        if (idToDelete == null) {
+          const raw = await bookmarks.list();
+          const list = normalizeBookmarkList(raw);
+          const row = findEnablerBookmarkRow(list, enabler.id);
+          idToDelete = row?.id ?? row?.pk;
+        }
+        if (idToDelete != null) {
+          await bookmarks.delete(idToDelete);
+        }
         setIsBookmarked(false);
         setBookmarkId(null);
+        setToast({
+          isOpen: true,
+          message: "Removed from bookmarks.",
+          type: "success",
+        });
       } catch (err) {
         console.error("Error removing bookmark:", err);
         setToast({
@@ -106,10 +124,14 @@ const EnablerProfileView = () => {
     } else {
       try {
         const newBookmark = await bookmarks.create({ enabler: enabler.id });
-        if (newBookmark && newBookmark.id) {
-          setIsBookmarked(true);
-          setBookmarkId(newBookmark.id);
-        }
+        const newId = newBookmark?.id ?? newBookmark?.pk;
+        setIsBookmarked(true);
+        setBookmarkId(newId ?? null);
+        setToast({
+          isOpen: true,
+          message: "Organization saved to your bookmarks.",
+          type: "success",
+        });
       } catch (err) {
         console.error("Error creating bookmark:", err);
         setToast({

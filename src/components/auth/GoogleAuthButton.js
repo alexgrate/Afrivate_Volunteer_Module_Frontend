@@ -13,7 +13,7 @@ const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
  */
 export function GoogleAuthButton({
   mode = 'login',
-  role = 'pathfinder',
+  role: signupRole = 'pathfinder',
   buttonText = 'Continue with Google',
   onError: onErrorProp,
   className = '',
@@ -28,52 +28,64 @@ export function GoogleAuthButton({
       return;
     }
     try {
-      const body = { id_token: idToken };
-      if (mode === 'signup') body.role = role;
-      const data = await api.auth.google(body);
+      const data = await api.googleAuthWithRole({
+        idToken,
+        mode,
+        role: signupRole,
+      });
       if (data?.access) {
         api.setTokens(data.access, data.refresh);
-        let role = null;
-        try {
-          const enabler = await api.profile.enablerGet();
-          if (enabler && enabler.id != null) {
-            api.setRole('enabler');
-            role = 'enabler';
-          }
-        } catch (enablerErr) {
-          if (enablerErr.status !== 403 && enablerErr.status !== 404) {
-            const msg = api.getApiErrorMessage(enablerErr) || 'Could not load your profile';
-            if (onErrorProp) onErrorProp(msg);
-            return;
-          }
+        if (data.role === 'enabler' || data.role === 'pathfinder') {
+          api.setRole(data.role);
         }
-        if (!role) {
+        let detectedRole = api.getRole();
+        if (!detectedRole || (detectedRole !== 'enabler' && detectedRole !== 'pathfinder')) {
+          detectedRole = null;
           try {
-            const pathfinder = await api.profile.pathfinderGet();
-            if (pathfinder && pathfinder.id != null) {
-              api.setRole('pathfinder');
-              role = 'pathfinder';
+            const enabler = await api.profile.enablerGet();
+            if (enabler && enabler.id != null) {
+              api.setRole('enabler');
+              detectedRole = 'enabler';
             }
-          } catch (pathfinderErr) {
-            const msg = api.getApiErrorMessage(pathfinderErr) || 'Could not load your profile';
-            if (onErrorProp) onErrorProp(pathfinderErr.status === 403 ? (msg || 'Access denied. This account does not have pathfinder access.') : msg);
-            return;
+          } catch (enablerErr) {
+            if (enablerErr.status !== 403 && enablerErr.status !== 404) {
+              const msg = api.getApiErrorMessage(enablerErr) || 'Could not load your profile';
+              if (onErrorProp) onErrorProp(msg);
+              return;
+            }
+          }
+          if (!detectedRole) {
+            try {
+              const pathfinder = await api.profile.pathfinderGet();
+              if (pathfinder && pathfinder.id != null) {
+                api.setRole('pathfinder');
+                detectedRole = 'pathfinder';
+              }
+            } catch (pathfinderErr) {
+              const msg = api.getApiErrorMessage(pathfinderErr) || 'Could not load your profile';
+              if (onErrorProp)
+                onErrorProp(
+                  pathfinderErr.status === 403
+                    ? msg || 'Access denied. This account does not have pathfinder access.'
+                    : msg
+                );
+              return;
+            }
           }
         }
-        if (!role) {
+        if (!detectedRole) {
           if (onErrorProp) onErrorProp('Could not determine your account type. Please contact support.');
           return;
         }
         await refetchUser();
         if (mode === 'signup') {
-          if (role === 'enabler') {
+          if (detectedRole === 'enabler') {
             navigate('/enabler/profile-setup');
           } else {
             navigate('/pathfinder/profile-setup');
           }
         } else {
-          const r = api.getRole();
-          navigate(r === 'enabler' ? '/enabler/dashboard' : '/pathf');
+          navigate(detectedRole === 'enabler' ? '/enabler/dashboard' : '/pathf');
         }
       } else if (onErrorProp) {
         onErrorProp('Sign-in succeeded but no token received');

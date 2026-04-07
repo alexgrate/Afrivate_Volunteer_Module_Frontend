@@ -13,7 +13,7 @@ const SignUp = () => {
   }, []);
 
   const [formData, setFormData] = useState({
-    userType: "freelancer", // default
+    userType: "pathfinder",
     username: "",
     email: "",
     password: "",
@@ -97,7 +97,7 @@ const SignUp = () => {
     try {
       const role = formData.userType === "pathfinder" ? "pathfinder" : "enabler";
 
-      await api.auth.register({
+      const regRes = await api.auth.register({
         username: formData.username,
         email: formData.email,
         password: formData.password,
@@ -105,34 +105,18 @@ const SignUp = () => {
         role,
       });
 
-      let tokenData = null;
-      try {
-        tokenData = await api.auth.token({
-          email: formData.email,
-          password: formData.password,
-        });
-        if (tokenData && tokenData.access) {
-          api.setTokens(tokenData.access, tokenData.refresh);
-        }
-      } catch (tokenErr) {
-        setServerError(getApiErrorMessage(tokenErr) || 'Account created but we could not sign you in. Please try logging in.');
-        setLoading(false);
+      // Some deployments return JWTs immediately on register
+      if (regRes?.access) {
+        api.setTokens(regRes.access, regRes.refresh);
+        api.setRole(role);
+        navigate(role === "enabler" ? "/enabler/profile-setup" : "/pathfinder/profile-setup");
         return;
       }
 
-      if (!tokenData || !tokenData.access) {
-        setServerError('Account created but we could not sign you in. Please try logging in.');
-        setLoading(false);
-        return;
-      }
-
-      api.setRole(role);
-
-      if (role === "enabler") {
-        navigate('/enabler/profile-setup');
-      } else {
-        navigate('/pathfinder/profile-setup');
-      }
+      // Standard flow: verify email OTP before tokens are issued
+      sessionStorage.setItem("registrationEmail", formData.email);
+      sessionStorage.setItem("registrationRole", role);
+      navigate("/verify-otp?flow=registration");
     } catch (err) {
       setServerError(getApiErrorMessage(err) || 'Signup failed');
     } finally {
@@ -155,7 +139,7 @@ const SignUp = () => {
         <div className="mb-3 w-full">
           <GoogleAuthButton
             mode="signup"
-            role={formData.userType === 'employer' ? 'enabler' : 'pathfinder'}
+            role={formData.userType === "enabler" ? "enabler" : "pathfinder"}
             buttonText="Sign up with Google"
             onError={setServerError}
             className="flex justify-center"

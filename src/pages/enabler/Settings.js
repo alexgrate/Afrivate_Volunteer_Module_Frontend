@@ -3,11 +3,14 @@ import { useNavigate } from "react-router-dom";
 import EnablerNavbar from "../../components/auth/EnablerNavbar";
 import Modal from "../../components/common/Modal";
 import Toast from "../../components/common/Toast";
-import { profile } from "../../services/api";
+import { Link } from "react-router-dom";
+import { profile, auth } from "../../services/api";
+import { useUser } from "../../context/UserContext";
 import { normalizeWebsiteForStorage } from "../../utils/websiteUrl";
 
 const Settings = () => {
   const navigate = useNavigate();
+  const { logout } = useUser();
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -216,8 +219,20 @@ const Settings = () => {
     setDeleteModal({ isOpen: true });
   };
 
-  const confirmDeleteAccount = () => {
-    setToast({ isOpen: true, message: "Account deletion requested", type: "info" });
+  const confirmDeleteAccount = async () => {
+    setDeleteModal({ isOpen: false });
+    try {
+      await auth.deleteAccount();
+      await logout();
+      setToast({ isOpen: true, message: "Your account has been deleted.", type: "success" });
+      navigate("/login", { replace: true });
+    } catch (err) {
+      setToast({
+        isOpen: true,
+        message: err.message || "Could not delete account. Try again or contact support.",
+        type: "error",
+      });
+    }
   };
 
   if (loading) {
@@ -544,6 +559,19 @@ const Settings = () => {
                 ))}
               </ul>
             )}
+          </div>
+
+          <div className="border-t border-gray-200 pt-8">
+            <h2 className="text-xl md:text-2xl font-bold text-[#45005A] mb-2">Password</h2>
+            <p className="text-gray-700 text-sm md:text-base mb-3">
+              Signed in with Google? Add a password so you can sign in with email too.
+            </p>
+            <Link
+              to="/set-password"
+              className="inline-block text-[#6A00B1] font-semibold text-sm hover:underline mb-8"
+            >
+              Set password
+            </Link>
           </div>
 
           <div className="border-t border-gray-200 pt-8">

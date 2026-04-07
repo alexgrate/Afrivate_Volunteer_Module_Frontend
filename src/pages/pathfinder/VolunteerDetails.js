@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useNavigate, useLocation, Link } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
 import FormattedText from "../../components/common/FormattedText";
 import { bookmarks, opportunities, profile, applications } from "../../services/api";
@@ -356,12 +356,18 @@ const VolunteerDetails = () => {
                   {jobData.company || 'Organization'}
                 </h3>
                 {(jobData._raw?.created_by ?? jobData.created_by) ? (
-                  <Link
-                    to={`/organization/${jobData._raw?.created_by ?? jobData.created_by}`}
-                    className="text-[#6A00B1] text-sm text-center block mb-5 hover:underline"
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigate(
+                        `/organization/${jobData._raw?.created_by ?? jobData.created_by}`,
+                        { state: { name: jobData.company } }
+                      )
+                    }
+                    className="text-[#6A00B1] text-sm text-center block mb-5 hover:underline w-full"
                   >
                     View organization profile
-                  </Link>
+                  </button>
                 ) : jobData.link && !jobData.link.includes("afrivate.com") ? (
                   <a
                     href={jobData.link}
