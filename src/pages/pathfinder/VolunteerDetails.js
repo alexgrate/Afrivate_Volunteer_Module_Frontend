@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import NavBar from "../../components/auth/Navbar";
 import FormattedText from "../../components/common/FormattedText";
+import Toast from "../../components/common/Toast";
 import { bookmarks, opportunities, profile, applications } from "../../services/api";
 import { getOrgName } from "../../utils/opportunityUtils";
 import { parseDescription } from "../../utils/descriptionUtils";
@@ -15,6 +16,8 @@ const VolunteerDetails = () => {
   const [similarOpportunities, setSimilarOpportunities] = useState([]);
   const [orgProfile, setOrgProfile] = useState(null);
   const [existingApplication, setExistingApplication] = useState(null);
+  const [bookmarkLoading, setBookmarkLoading] = useState(false);
+  const [toast, setToast] = useState({ isOpen: false, message: "", type: "success" });
 
   useEffect(() => {
     document.title = "Volunteer Details - AfriVate";
@@ -67,6 +70,7 @@ const VolunteerDetails = () => {
             }
           } catch (err) {
             console.error("Error loading opportunity:", err);
+            setToast({ isOpen: true, message: "Unable to load opportunity details. Please try again.", type: "error" });
             navigate("/opportunity");
           }
         } else {
@@ -86,6 +90,7 @@ const VolunteerDetails = () => {
       setOrgProfile(data);
     } catch (err) {
       console.error("Error loading org profile:", err);
+      setToast({ isOpen: true, message: "Could not load organization details.", type: "error" });
       setOrgProfile(null);
     }
   };
@@ -154,19 +159,26 @@ const VolunteerDetails = () => {
   };
 
   const handleBookmarkToggle = async () => {
+    if (bookmarkLoading) return;
+    setBookmarkLoading(true);
     try {
       const oppId = parseInt(jobData.id, 10);
       if (isBookmarked) {
         await bookmarks.opportunitiesSavedDelete(oppId);
         setIsBookmarked(false);
+        setToast({ isOpen: true, message: "Bookmark removed.", type: "success" });
       } else {
         await bookmarks.opportunitiesSavedCreate({
           opportunity_id: oppId,
         });
         setIsBookmarked(true);
+        setToast({ isOpen: true, message: "Bookmark added.", type: "success" });
       }
     } catch (error) {
       console.error("Bookmark toggle error:", error);
+      setToast({ isOpen: true, message: "Failed to update bookmark. Please try again.", type: "error" });
+    } finally {
+      setBookmarkLoading(false);
     }
   };
 
@@ -235,14 +247,18 @@ const VolunteerDetails = () => {
                 </button>
                 <button
                   onClick={handleBookmarkToggle}
+                  disabled={bookmarkLoading}
                   className={`w-10 h-10 flex items-center justify-center border rounded-lg transition-colors ${
                     isBookmarked 
                       ? 'bg-purple-50 border-purple-300 hover:bg-purple-100' 
                       : 'border-gray-300 hover:bg-gray-50'
-                  }`}
+                  } ${bookmarkLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   title={isBookmarked ? 'Remove from bookmarks' : 'Save to bookmarks'}
+                  aria-label={isBookmarked ? 'Remove from bookmarks' : 'Save to bookmarks'}
                 >
-                  {isBookmarked ? (
+                  {bookmarkLoading ? (
+                    <div className="w-4 h-4 border-2 border-[#6A00B1] border-t-transparent rounded-full animate-spin"></div>
+                  ) : isBookmarked ? (
                     <i className="fa fa-bookmark text-[#6A00B1] text-lg"></i>
                   ) : (
                     <svg 
@@ -465,6 +481,12 @@ const VolunteerDetails = () => {
           )}
         </div>
       </div>
+      <Toast
+        isOpen={toast.isOpen}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast({ ...toast, isOpen: false })}
+      />
     </div>
   );
 };

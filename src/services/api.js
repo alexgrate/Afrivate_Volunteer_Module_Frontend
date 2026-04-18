@@ -82,7 +82,7 @@ async function request(method, path, options = {}) {
     "Content-Type": "application/json",
     ...(options.headers || {}),
   };
-  if (access && !headers["Authorization"]) {
+  if (access && !headers["Authorization"] && !options.public) {
     headers["Authorization"] = `Bearer ${access}`;
   }
 
@@ -321,6 +321,24 @@ export const bookmark = {
   /** Enabler: remove saved bookmark by pathfinder id. DELETE /api/bookmark/applicants/saved/{pathfinder_id}/ */
   applicantsSavedDelete(pathfinderId) {
     return request("DELETE", `/bookmark/applicants/saved/${pathfinderId}/`);
+  },
+
+  /** Pathfinder: bookmark an enabler. POST /api/bookmark/enablers/saved/ */
+  enablersSavedCreate(body) {
+    const data = {};
+    if (body.enabler != null) data.enabler = body.enabler;
+    if (body.enabler_id != null) data.enabler_id = body.enabler_id;
+    return request("POST", "/bookmark/enablers/saved/", { data });
+  },
+
+  /** Pathfinder: list bookmarked enablers. GET /api/bookmark/enablers/saved/ */
+  enablersSavedList() {
+    return request("GET", "/bookmark/enablers/saved/");
+  },
+
+  /** Pathfinder: remove an enabler bookmark. DELETE /api/bookmark/enablers/saved/{enabler_id}/ */
+  enablersSavedDelete(enablerId) {
+    return request("DELETE", `/bookmark/enablers/saved/${enablerId}/`);
   },
 };
 
@@ -608,10 +626,10 @@ export const opportunities = {
   },
 
   /**
-   * View single opportunity (public endpoint).
+   * View single opportunity (public endpoint, no auth required).
    */
   get(id) {
-    return request("GET", `/opportunities/${id}/`);
+    return request("GET", `/opportunities/${id}/`, { public: true });
   },
 
   /**

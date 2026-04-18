@@ -34,6 +34,8 @@ const NavBar = () => {
         }
       } catch (err) {
         console.error('Error loading profile:', err);
+        // Fallback: use default profile data
+        setProfileData({ first_name: 'User', last_name: '', title: 'Pathfinder' });
       }
     };
     loadProfile();
